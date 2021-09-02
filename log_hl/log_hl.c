@@ -128,7 +128,7 @@ void log_hl_line_handler(yed_event *event) {
     frame = event->frame;
 
     if (!frame
-    ||  frame->buffer != ys->log_buff) {
+    ||  frame->buffer != yed_get_log_buffer()) {
         return;
     }
 
