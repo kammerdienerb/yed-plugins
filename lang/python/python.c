@@ -32,15 +32,11 @@ LOG_FN_ENTER();
         maybe_change_ft(tree_it_val(bit));
     }
 
-    YEXE("plugin-load", "lang/syntax/python");
-
 LOG_EXIT();
     return 0;
 }
 
-void unload(yed_plugin *self) {
-    YEXE("plugin-unload", "lang/syntax/python");
-}
+void unload(yed_plugin *self) {}
 
 void maybe_change_ft(yed_buffer *buff) {
     char *ext;

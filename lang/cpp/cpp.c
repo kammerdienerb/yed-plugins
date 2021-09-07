@@ -32,15 +32,11 @@ LOG_FN_ENTER();
         maybe_change_ft(tree_it_val(bit));
     }
 
-    YEXE("plugin-load", "lang/syntax/cpp");
-
 LOG_EXIT();
     return 0;
 }
 
-void unload(yed_plugin *self) {
-    YEXE("plugin-unload", "lang/syntax/cpp");
-}
+void unload(yed_plugin *self) {}
 
 int kwd_scan(yed_buffer *buff) {
     yed_line *line;
