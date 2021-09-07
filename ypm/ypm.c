@@ -1594,6 +1594,7 @@ static void key_handler(yed_event *event) {
             }
             array_free(update_dds);
             ys->redraw_cls = 1;
+            fill_plugin_arr();
             YEXE("ypm-update");
         } else if(event->key == 'n' || event->key == 'N') {
             update_menu_is_up = 0;
