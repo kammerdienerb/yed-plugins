@@ -85,7 +85,7 @@ void line_numbers_line_handler(yed_event *event) {
 void line_numbers_frame_pre_update(yed_event *event) {
     int scomp;
 
-    scomp = yed_get_active_style_scomp_nr_by_name(yed_get_var("line-number-scomp"));
+    scomp = yed_scomp_nr_by_name(yed_get_var("line-number-scomp"));
     if (scomp != scomp_save) {
         ys->redraw = 1;
     }

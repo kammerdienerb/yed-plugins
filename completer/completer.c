@@ -24,6 +24,10 @@ int yed_plugin_boot(yed_plugin *self) {
 
     YED_PLUG_VERSION_CHECK();
 
+    if (yed_get_var("completer-sources") == NULL) {
+        yed_set_var("completer-sources", "word");
+    }
+
     if (yed_get_var("completer-popup") == NULL) {
         yed_set_var("completer-popup", "yes");
     }
@@ -192,6 +196,38 @@ char *completer_get_current_word(void) {
     return yed_word_at_point(frame, frame->cursor_line, frame->cursor_col - 1);
 }
 
+static int do_complete(char *word, yed_completion_results *results) {
+    int      status;
+    char    *sources_str;
+    array_t  sources;
+    char    *tok;
+
+    status = COMPL_ERR_NO_ERR;
+
+    sources_str = yed_get_var("completer-sources");
+    if (sources_str == NULL) { return COMPL_ERR_NO_COMPL; }
+
+    sources_str = strdup(sources_str);
+    sources     = array_make(char*);
+
+    for (tok = strtok(sources_str, " "); tok != NULL; tok = strtok(NULL, " ")) {
+        array_push(sources, tok);
+    }
+
+    if (array_len(sources) > 0) {
+        if (array_len(sources) == 1) {
+            status = yed_complete(*(char**)array_data(sources), word, results);
+        } else {
+            status = yed_complete_multiple(array_len(sources), array_data(sources), word, results);
+        }
+    }
+
+    array_free(sources);
+    free(sources_str);
+
+    return status;
+}
+
 int completer_cmd_line(void) {
     yed_frame               *frame;
     yed_buffer              *buff;
@@ -216,7 +252,7 @@ int completer_cmd_line(void) {
 
     word_len = strlen(word);
 
-    compl_status    = yed_complete("word", word, &results);
+    compl_status    = do_complete(word, &results);
     compl_num_items = array_len(results.strings);
     cpl             = results.common_prefix_len;
 
@@ -270,7 +306,7 @@ static int completer_no_auto_popup(void) {
 
     word_len = strlen(word);
 
-    compl_status    = yed_complete("word", word, &results);
+    compl_status    = do_complete(word, &results);
     compl_num_items = array_len(results.strings);
     cpl             = results.common_prefix_len;
 
@@ -316,7 +352,7 @@ static int completer_auto_popup(void) {
 
     word_len = strlen(word);
 
-    compl_status    = yed_complete("word", word, &results);
+    compl_status    = do_complete(word, &results);
     compl_num_items = array_len(results.strings);
 
     if (compl_status == COMPL_ERR_NO_ERR && compl_num_items > 0) {
