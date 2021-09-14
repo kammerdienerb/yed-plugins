@@ -984,8 +984,9 @@ static int ctags_compl(char *string, struct yed_completion_results_t *results) {
 }
 
 void ctags_gen(int n_args, char **args) {
-    char       cmd_buff[1024];
+    char       cmd_buff[4096];
     char      *ctags_flags;
+    char      *additional_paths;
 
     if (n_args != 0) {
         yed_cerr("expected 0 arguments but got %d -- set cflags options in 'ctags-flags'", n_args);
@@ -1003,7 +1004,12 @@ void ctags_gen(int n_args, char **args) {
         return;
     }
 
-    snprintf(cmd_buff, sizeof(cmd_buff), "ctags %s > /dev/null", ctags_flags);
+    additional_paths = yed_get_var("ctags-additional-paths");
+    if (additional_paths == NULL) {
+        additional_paths = "";
+    }
+
+    snprintf(cmd_buff, sizeof(cmd_buff), "ctags %s %s > /dev/null", ctags_flags, additional_paths);
 
     yed_cprint("running 'ctags %s' in background...", ctags_flags);
     gen_thread_finished = 0;
