@@ -293,6 +293,7 @@ static void launch_tmp_tags_gen(void) {
     DIR            *d;
     struct dirent  *dent;
     char            check_path[4096];
+    char            rel_path[2048];
 
     cmd_buff[0] = 0;
 
@@ -324,12 +325,12 @@ static void launch_tmp_tags_gen(void) {
 
     if ((d = opendir(".")) != NULL) {
         while ((dent = readdir(d)) != NULL) {
-            if (dent->d_type != DT_REG) { goto next; }
+            if (dent->d_type != DT_REG) { goto next1; }
 
             abs_path(dent->d_name, check_path);
 
             array_traverse(tmp_tags_buffers, it) {
-                if (strcmp(*it, check_path) == 0) { goto next; }
+                if (strcmp(*it, check_path) == 0) { goto next1; }
             }
 
             if (  strlen(cmd_buff)
@@ -341,7 +342,33 @@ static void launch_tmp_tags_gen(void) {
 
             strcat(cmd_buff, " ");
             strcat(cmd_buff, dent->d_name);
-next:;
+next1:;
+        }
+        closedir(d);
+    }
+
+    if ((d = opendir("src")) != NULL) {
+        while ((dent = readdir(d)) != NULL) {
+            if (dent->d_type != DT_REG) { goto next2; }
+
+            snprintf(rel_path, sizeof(rel_path), "src/%s", dent->d_name);
+
+            abs_path(rel_path, check_path);
+
+            array_traverse(tmp_tags_buffers, it) {
+                if (strcmp(*it, check_path) == 0) { goto next2; }
+            }
+
+            if (  strlen(cmd_buff)
+                + 1 /* NULL byte */
+                + strlen(" ")
+                + strlen(rel_path)
+                + strlen(" > /dev/null")
+                > sizeof(cmd_buff)) { closedir(d); goto trunc; }
+
+            strcat(cmd_buff, " ");
+            strcat(cmd_buff, rel_path);
+next2:;
         }
         closedir(d);
     }
