@@ -64,15 +64,15 @@ int yed_plugin_boot(yed_plugin *self) {
 static void unload(yed_plugin *self) {}
 
 static void fstyle(int n_args, char **args) {
-    char      *path;
-    char       full_path[4096];
-    FILE      *f;
-    char      *base_ext;
-    char      *base;
-    yed_style  s;
-    char       line[512];
-    yed_attrs  attr;
-    int        scomp;
+    char       *path;
+    char        full_path[4096];
+    FILE       *f;
+    const char *base_ext;
+    const char *base;
+    yed_style   s;
+    char        line[512];
+    yed_attrs   attr;
+    int         scomp;
 
     if (n_args == 0) {
         if (ys->active_frame == NULL) {
@@ -127,17 +127,16 @@ static void fstyle(int n_args, char **args) {
         }
     }
 
-    yed_plugin_set_style(Self, base, &s);
-    YEXE("style", base);
+    yed_plugin_set_style(Self, (char*)base, &s);
+    YEXE("style", (char*)base);
 
-    free(base);
+    free((void*)base);
 
     fclose(f);
 }
 
 static void maybe_change_ft(yed_buffer *buff) {
-    char *ext;
-    char *base;
+    const char *ext;
 
     if (buff->ft != FT_UNKNOWN) {
         return;
