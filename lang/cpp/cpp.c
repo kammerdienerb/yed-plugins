@@ -122,7 +122,7 @@ int kwd_scan(yed_buffer *buff) {
 }
 
 void maybe_change_ft(yed_buffer *buff) {
-    char *ext;
+    const char *ext;
 
     if (buff->ft != FT_UNKNOWN
     &&  buff->ft != yed_get_ft("C")) {

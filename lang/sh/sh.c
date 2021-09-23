@@ -39,7 +39,7 @@ LOG_EXIT();
 void unload(yed_plugin *self) {}
 
 void maybe_change_ft(yed_buffer *buff) {
-    char *ext;
+    const char *ext;
 
     if (buff->ft != FT_UNKNOWN) {
         return;
