@@ -149,10 +149,22 @@ static void notif_start(void) {
     for (i = 0; i < side_padding; i += 1) { strcat(line_buff, " "); }
     strcat(line_buff, line);
     for (i = 0; i < line_len - side_padding - strlen(line); i += 1) { strcat(line_buff, " "); }
-    dd = yed_direct_draw_style(ys->term_rows - 2 - 3/* 2 */,
-                               ys->term_cols - line_len,
-                               STYLE_status_line,
-                               line_buff);
+    if ( yed_var_is_truthy("builder-popup-rg") ) {
+        yed_attrs box_color;
+        box_color.flags = ATTR_16;
+        box_color.bg = build_failed ? ATTR_16_RED : ATTR_16_GREEN;
+        box_color.fg = ATTR_16_BLACK;
+
+        dd = yed_direct_draw(ys->term_rows - 2 - 3/* 2 */,
+                                ys->term_cols - line_len,
+                                box_color,
+                                line_buff);
+    }else{
+        dd = yed_direct_draw_style(ys->term_rows - 2 - 3/* 2 */,
+                                ys->term_cols - line_len,
+                                STYLE_status_line,
+                                line_buff);
+    }
     array_push(dd_lines, dd);
 
     line         = build_failed ? "FAILED" : "SUCCEEDED";
@@ -160,10 +172,22 @@ static void notif_start(void) {
     for (i = 0; i < side_padding; i += 1) { strcat(line_buff, " "); }
     strcat(line_buff, line);
     for (i = 0; i < line_len - side_padding - strlen(line); i += 1) { strcat(line_buff, " "); }
-    dd = yed_direct_draw_style(ys->term_rows - 2 - 2/* 3 */,
-                               ys->term_cols - line_len,
-                               STYLE_status_line,
-                               line_buff);
+    if ( yed_var_is_truthy("builder-popup-rg") ) {
+        yed_attrs box_color;
+        box_color.flags = ATTR_16;
+        box_color.bg = build_failed ? ATTR_16_RED : ATTR_16_GREEN;
+        box_color.fg = ATTR_16_BLACK;
+
+        dd = yed_direct_draw(ys->term_rows - 2 - 2/* 3 */,
+                                ys->term_cols - line_len,
+                                box_color,
+                                line_buff);
+    }else{
+        dd = yed_direct_draw_style(ys->term_rows - 2 - 2/* 3 */,
+                                ys->term_cols - line_len,
+                                STYLE_status_line,
+                                line_buff);
+    }
     array_push(dd_lines, dd);
 
     line         = third_line;
@@ -171,10 +195,22 @@ static void notif_start(void) {
     for (i = 0; i < side_padding; i += 1) { strcat(line_buff, " "); }
     strcat(line_buff, line);
     for (i = 0; i < line_len - side_padding - strlen(line); i += 1) { strcat(line_buff, " "); }
-    dd = yed_direct_draw_style(ys->term_rows - 2 - 1/* 4 */,
-                               ys->term_cols - line_len,
-                               STYLE_status_line,
-                               line_buff);
+    if ( yed_var_is_truthy("builder-popup-rg") ) {
+        yed_attrs box_color;
+        box_color.flags = ATTR_16;
+        box_color.bg = build_failed ? ATTR_16_RED : ATTR_16_GREEN;
+        box_color.fg = ATTR_16_BLACK;
+
+        dd = yed_direct_draw(ys->term_rows - 2 - 1/* 4 */,
+                                ys->term_cols - line_len,
+                                box_color,
+                                line_buff);
+    }else{
+        dd = yed_direct_draw_style(ys->term_rows - 2 - 1/* 4 */,
+                                ys->term_cols - line_len,
+                                STYLE_status_line,
+                                line_buff);
+    }
     array_push(dd_lines, dd);
 
 
