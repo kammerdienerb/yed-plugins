@@ -345,8 +345,7 @@ void man(int n_args, char **args) {
 
     strcat(pre_cmd_buff, " | col -bx; exit ${PIPESTATUS[0]} 2>/dev/null");
 
-    snprintf(cmd_buff, sizeof(cmd_buff),
-             "bash -c '", width);
+    snprintf(cmd_buff, sizeof(cmd_buff), "bash -c '");
     strcat(cmd_buff, pre_cmd_buff);
     strcat(cmd_buff, "'");
 
