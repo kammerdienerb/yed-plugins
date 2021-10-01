@@ -333,12 +333,7 @@ void man(int n_args, char **args) {
     cmd_buff[0]     = 0;
     err_buff[0]     = 0;
 
-#ifdef __APPLE__
     strcat(pre_cmd_buff, "man");
-#else
-    strcat(pre_cmd_buff, "man --ascii");
-#endif
-
     strcat(err_buff,     "man");
 
     for (i = 0; i < n_args; i += 1) {
@@ -348,27 +343,21 @@ void man(int n_args, char **args) {
         strcat(err_buff, args[i]);
     }
 
-#ifdef __APPLE__
     strcat(pre_cmd_buff, " | col -bx; exit ${PIPESTATUS[0]} 2>/dev/null");
-#else
-    strcat(pre_cmd_buff, " 2>/dev/null");
-#endif
 
+    snprintf(cmd_buff, sizeof(cmd_buff),
+             "bash -c '", width);
     strcat(cmd_buff, pre_cmd_buff);
-    strcat(cmd_buff, " >/dev/null");
+    strcat(cmd_buff, "'");
 
-    if ((stream = popen(cmd_buff, "r")) == NULL) {
-        yed_cerr("failed to invoke '%s'", cmd_buff);
-        return;
-    }
-    status = pclose(stream);
-    if (status) {
+    yed_run_subproc(cmd_buff, NULL, &status);
+
+    if (status != 0) {
         yed_cerr("command '%s' failed", err_buff);
         return;
     }
 
     YEXE("special-buffer-prepare-focus", "*man-page");
-
     if (ys->active_frame != NULL) {
         width = ys->active_frame->width;
     } else {
