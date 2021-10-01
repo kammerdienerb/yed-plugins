@@ -287,12 +287,13 @@ static void clear_all_hints(void) {
 }
 
 static void launch_tmp_tags_gen(void) {
-    char            cmd_buff[4096];
+    char            cmd_buff[8192];
     char          **it;
     char           *add_paths;
     DIR            *d;
     struct dirent  *dent;
     char            check_path[4096];
+    const char     *base;
     char            rel_path[2048];
 
     cmd_buff[0] = 0;
@@ -329,6 +330,10 @@ static void launch_tmp_tags_gen(void) {
 
             abs_path(dent->d_name, check_path);
 
+            base = get_path_basename(check_path);
+
+            if (strncmp(base, ".yed_ctags", strlen(".yed_ctags")) == 0) { goto next1; }
+
             array_traverse(tmp_tags_buffers, it) {
                 if (strcmp(*it, check_path) == 0) { goto next1; }
             }
@@ -354,6 +359,10 @@ next1:;
             snprintf(rel_path, sizeof(rel_path), "src/%s", dent->d_name);
 
             abs_path(rel_path, check_path);
+
+            base = get_path_basename(check_path);
+
+            if (strncmp(base, ".yed_ctags", strlen(".yed_ctags")) == 0) { goto next2; }
 
             array_traverse(tmp_tags_buffers, it) {
                 if (strcmp(*it, check_path) == 0) { goto next2; }
@@ -402,6 +411,11 @@ static void setup_tmp_tags(void) {
     using_tmp = 1;
 
     launch_tmp_tags_gen();
+
+    if (yed_var_is_truthy("ctags-enable-extra-highlighting")
+    ||  yed_var_is_truthy("ctags-compl")) {
+        ctags_parse();
+    }
 }
 
 int parse_tag_line(char *line, char **tag, char **file, char **kind) {
@@ -856,12 +870,17 @@ LOG_EXIT();
 }
 
 void ctags_buffer_post_load_handler(yed_event *event) {
-    char **it;
-    char  *cpy;
+    const char  *base;
+    char       **it;
+    char        *cpy;
 
     if (!using_tmp)                  { return; }
     if (event->buffer == NULL)       { return; }
     if (event->buffer->path == NULL) { return; }
+    if (event->buffer_is_new_file)   { return; }
+
+    base = get_path_basename(event->buffer->path);
+    if (strncmp(base, ".yed_ctags", strlen(".yed_ctags")) == 0) { return; }
 
     array_traverse(tmp_tags_buffers, it) {
         if (strcmp(*it, event->buffer->path) == 0) { return; }
@@ -871,6 +890,11 @@ void ctags_buffer_post_load_handler(yed_event *event) {
     array_push(tmp_tags_buffers, cpy);
 
     launch_tmp_tags_gen();
+
+    if (yed_var_is_truthy("ctags-enable-extra-highlighting")
+    ||  yed_var_is_truthy("ctags-compl")) {
+        ctags_parse();
+    }
 }
 
 void ctags_buffer_post_write_handler(yed_event *event) {
