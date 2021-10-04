@@ -322,8 +322,8 @@ void man(int n_args, char **args) {
     char       cmd_buff[1024];
     char       err_buff[1024];
     int        i;
+    char      *output;
     int        status;
-    FILE      *stream;
     int        man_section;
     yed_line  *line;
     yed_glyph *git;
@@ -343,13 +343,15 @@ void man(int n_args, char **args) {
         strcat(err_buff, args[i]);
     }
 
-    strcat(pre_cmd_buff, " | col -bx; exit ${PIPESTATUS[0]} 2>/dev/null");
+    strcat(pre_cmd_buff, "");
 
     snprintf(cmd_buff, sizeof(cmd_buff), "bash -c '");
     strcat(cmd_buff, pre_cmd_buff);
     strcat(cmd_buff, "'");
 
-    yed_run_subproc(cmd_buff, NULL, &status);
+    output = yed_run_subproc(cmd_buff, NULL, &status);
+
+    if (output != NULL) { free(output); }
 
     if (status != 0) {
         yed_cerr("command '%s' failed", err_buff);
