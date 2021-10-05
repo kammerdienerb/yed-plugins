@@ -35,6 +35,7 @@ static int                     hint_row;
 static tree(ctags_str_t, int)  tags;
 static pthread_mutex_t         tags_mtx = PTHREAD_MUTEX_INITIALIZER;
 static highlight_info          hinfo;
+static highlight_info          hinfo_tmp;
 
 yed_buffer *get_or_make_buff(void) {
     yed_buffer *buff;
@@ -89,6 +90,7 @@ int yed_plugin_boot(yed_plugin *self) {
     yed_plugin_set_unload_fn(self, unload);
 
     highlight_info_make(&hinfo);
+    highlight_info_make(&hinfo_tmp);
     tags       = tree_make(ctags_str_t, int);
     hint_stack = array_make(ctags_fn_hint);
 
@@ -451,12 +453,15 @@ int parse_tag_line(char *line, char **tag, char **file, char **kind) {
 }
 
 void * ctags_parse_thread(void *arg) {
-    FILE *f;
-    char  line[4096];
-    char *tag;
-    char *file;
-    char *kind;
-    int   k;
+    FILE                      *f;
+    char                       line[4096];
+    char                      *tag;
+    char                      *file;
+    char                      *kind;
+    int                        k;
+    int                        do_hl;
+    tree_it(ctags_str_t, int)  it;
+    char                      *key;
 
     pthread_mutex_lock(&parse_mtx);
 
@@ -495,6 +500,27 @@ void * ctags_parse_thread(void *arg) {
 
     fclose(f);
 
+    do_hl = !!arg;
+
+    if (do_hl) {
+        highlight_info_free(&hinfo_tmp);
+        highlight_info_make(&hinfo_tmp);
+
+        tree_traverse(tags, it) {
+            switch (tree_it_val(it)) {
+                case TAG_KIND_MACRO:
+                    highlight_add_kwd(&hinfo_tmp, tree_it_key(it), HL_PP);
+                    break;
+                case TAG_KIND_TYPE:
+                    highlight_add_kwd(&hinfo_tmp, tree_it_key(it), HL_TYPE);
+                    break;
+                case TAG_KIND_ENUMERATOR:
+                    highlight_add_kwd(&hinfo_tmp, tree_it_key(it), HL_CON);
+                    break;
+            }
+        }
+    }
+
 out:;
     pthread_mutex_unlock(&tags_mtx);
 
@@ -504,30 +530,6 @@ out:;
     pthread_mutex_unlock(&parse_mtx);
 
     return NULL;
-}
-
-void ctags_highlight_from_parse(void) {
-    tree_it(ctags_str_t, int) it;
-
-    highlight_info_make(&hinfo);
-
-    pthread_mutex_lock(&tags_mtx);
-
-    tree_traverse(tags, it) {
-        switch (tree_it_val(it)) {
-            case TAG_KIND_MACRO:
-                highlight_add_kwd(&hinfo, tree_it_key(it), HL_PP);
-                break;
-            case TAG_KIND_TYPE:
-                highlight_add_kwd(&hinfo, tree_it_key(it), HL_TYPE);
-                break;
-            case TAG_KIND_ENUMERATOR:
-                highlight_add_kwd(&hinfo, tree_it_key(it), HL_CON);
-                break;
-        }
-    }
-
-    pthread_mutex_unlock(&tags_mtx);
 }
 
 void ctags_hl_cleanup(void) {
@@ -556,11 +558,19 @@ out:;
 }
 
 void ctags_finish_parse(void) {
+    highlight_info hinfo_swap;
+
 LOG_CMD_ENTER("ctags");
     parse_thread_started = parse_thread_finished = 0;
-    ctags_hl_cleanup();
-    ctags_highlight_from_parse();
+
+    pthread_mutex_lock(&tags_mtx);
+    memcpy(&hinfo_swap, &hinfo, sizeof(hinfo));
+    memcpy(&hinfo, &hinfo_tmp, sizeof(hinfo_tmp));
+    memcpy(&hinfo_tmp, &hinfo_swap, sizeof(hinfo_swap));
+    pthread_mutex_unlock(&tags_mtx);
+
     yed_cprint("tags have been parsed for highlighting/completion");
+
     has_parsed = 1;
     ys->redraw = 1;
 LOG_EXIT();
@@ -572,7 +582,7 @@ void ctags_parse(void) {
     parse_thread_finished = 0;
     parse_thread_started  = 1;
     ctags_parse_cleanup();
-    pthread_create(&parse_pthread, NULL, ctags_parse_thread, NULL);
+    pthread_create(&parse_pthread, NULL, ctags_parse_thread, (void*)(u64)yed_var_is_truthy("ctags-enable-extra-highlighting"));
 
     /* See if the thread can finish in 15ms... if so, we can avoid the pump delay. */
     usleep(15000);
