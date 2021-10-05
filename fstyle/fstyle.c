@@ -231,15 +231,13 @@ static void syntax_fstyle_mod_handler(yed_event *event) {
 }
 
 static yed_attrs parse_attr_line(char *line, int *scomp) {
+    char      *scomp_str;
     yed_attrs  attrs;
     array_t    words;
     int        idx;
     char      *word;
+    unsigned   color;
     char       rgb_str[9];
-    unsigned   rgb;
-
-#define WORD_OR_NULL(_idx) \
-    (((_idx) >= array_len(words)) ? NULL : *(char**)array_item(words, (_idx)))
 
     memset(&attrs, 0, sizeof(attrs));
 
@@ -247,53 +245,14 @@ static yed_attrs parse_attr_line(char *line, int *scomp) {
 
     if (array_len(words) == 0) { goto out; }
 
-    idx = 0;
+    scomp_str = *(char**)array_item(words, 0);
     if (scomp != NULL) {
-        word = WORD_OR_NULL(idx);
-        if (word == NULL) { goto out; }
-        *scomp = yed_scomp_nr_by_name(word);
+        *scomp = yed_scomp_nr_by_name(scomp_str);
     }
 
-    idx += 1;
+    if (array_len(words) < 2) { goto out; }
 
-    while (idx < array_len(words)) {
-        word = WORD_OR_NULL(idx);
-        if (word == NULL) { goto out; }
-
-        if (       strcmp(word, "fg")        == 0) {
-            idx += 1;
-            word = WORD_OR_NULL(idx);
-            if (word == NULL) { goto out; }
-
-            snprintf(rgb_str, sizeof(rgb_str), "0x%s", word);
-            if (sscanf(rgb_str, "%x", &rgb)) {
-                attrs.flags &= ~ATTR_16;
-                attrs.flags &= ~ATTR_256;
-                attrs.flags |=  ATTR_RGB;
-                attrs.fg     = rgb;
-            }
-        } else if (strcmp(word, "bg")        == 0) {
-            idx += 1;
-            word = WORD_OR_NULL(idx);
-            if (word == NULL) { goto out; }
-
-            snprintf(rgb_str, sizeof(rgb_str), "0x%s", word);
-            if (sscanf(rgb_str, "%x", &rgb)) {
-                attrs.flags &= ~ATTR_16;
-                attrs.flags &= ~ATTR_256;
-                attrs.flags |=  ATTR_RGB;
-                attrs.bg = rgb;
-            }
-        } else if (strcmp(word, "inverse")   == 0) {
-            attrs.flags |= ATTR_INVERSE;
-        } else if (strcmp(word, "bold")      == 0) {
-            attrs.flags |= ATTR_BOLD;
-        } else if (strcmp(word, "underline") == 0) {
-            attrs.flags |= ATTR_UNDERLINE;
-        }
-
-        idx += 1;
-    }
+    attrs = yed_parse_attrs(line + strlen(scomp_str));
 
 out:;
     free_string_array(words);
