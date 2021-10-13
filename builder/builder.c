@@ -385,6 +385,8 @@ void builder_pump_handler(yed_event *event) {
 
     u64 now_ms;
 
+    yed_set_var("builder-status", (char*)builder_get_status_string());
+
     if (build_is_running) {
         builder_update_running();
     }

@@ -368,7 +368,7 @@ void man(int n_args, char **args) {
     snprintf(cmd_buff, sizeof(cmd_buff),
              "bash -c 'MANWIDTH=%d ", width);
     strcat(cmd_buff, pre_cmd_buff);
-    strcat(cmd_buff, "'");
+    strcat(cmd_buff, " | col -bx; exit ${PIPESTATUS[0]}'");
 
     get_or_make_buff()->flags &= ~BUFF_RD_ONLY;
 
