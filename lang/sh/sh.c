@@ -51,7 +51,7 @@ void maybe_change_ft(yed_buffer *buff) {
         return;
     }
 
-    if (strcmp(ext, "sh") == 0) {
+    if (strcmp(ext, "sh") == 0 || strcmp(ext, "bashrc") == 0 || strcmp(ext, "zshrc") == 0 || strcmp(ext, "zsh") == 0) {
         yed_buffer_set_ft(buff, yed_get_ft("Shell"));
     }
 }
