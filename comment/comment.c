@@ -15,6 +15,10 @@ void comment_toggle_line_latex(yed_frame *frame, yed_line *line, int row);
 void comment_line_latex(yed_frame *frame, int row);
 void uncomment_line_latex(yed_frame *frame, int row);
 
+void comment_toggle_line_zig(yed_frame *frame, yed_line *line, int row);
+void comment_line_zig(yed_frame *frame, int row);
+void uncomment_line_zig(yed_frame *frame, int row);
+
 int yed_plugin_boot(yed_plugin *self) {
     YED_PLUG_VERSION_CHECK();
 
@@ -82,8 +86,9 @@ void comment_toggle(int n_args, char **args) {
 }
 
 int comment_toggle_line(yed_frame *frame, yed_line *line, int row) {
-    if (       frame->buffer->ft == yed_get_ft("C")      ||
-               frame->buffer->ft == yed_get_ft("C++"))   {
+    if (       frame->buffer->ft == yed_get_ft("C")       ||
+               frame->buffer->ft == yed_get_ft("C++")     ||
+               frame->buffer->ft == yed_get_ft("Golang")) {
         comment_toggle_line_c(frame, line, row);
 
     } else if (frame->buffer->ft == yed_get_ft("Shell")  ||
@@ -94,6 +99,9 @@ int comment_toggle_line(yed_frame *frame, yed_line *line, int row) {
 
     } else if (frame->buffer->ft == yed_get_ft("LaTeX")) {
         comment_toggle_line_latex(frame, line, row);
+
+    } else if (frame->buffer->ft == yed_get_ft("Zig"))   {
+        comment_toggle_line_zig(frame, line, row);
 
     } else {
         return 0;
@@ -207,6 +215,42 @@ void comment_line_latex(yed_frame *frame, int row) {
 }
 
 void uncomment_line_latex(yed_frame *frame, int row) {
+    yed_delete_from_line(frame->buffer, row, 1);
+    yed_delete_from_line(frame->buffer, row, 1);
+}
+
+/* Zig */
+void comment_toggle_line_zig(yed_frame *frame, yed_line *line, int row) {
+    int        line_len;
+    yed_glyph *g;
+
+    line_len = line->visual_width;
+
+    /* Are we uncommenting? */
+    if (line_len >= 3) {
+        g = yed_line_col_to_glyph(line, 1);
+        if (g->c == '/') {
+            g = yed_line_col_to_glyph(line, 2);
+            if (g->c == '/') {
+                g = yed_line_col_to_glyph(line, 3);
+                if (g->c == ' ') {
+                    uncomment_line_zig(frame, row);
+                    return;
+                }
+            }
+        }
+    }
+    comment_line_zig(frame, row);
+}
+
+void comment_line_zig(yed_frame *frame, int row) {
+    yed_insert_into_line(frame->buffer, row, 1, G(' '));
+    yed_insert_into_line(frame->buffer, row, 1, G('/'));
+    yed_insert_into_line(frame->buffer, row, 1, G('/'));
+}
+
+void uncomment_line_zig(yed_frame *frame, int row) {
+    yed_delete_from_line(frame->buffer, row, 1);
     yed_delete_from_line(frame->buffer, row, 1);
     yed_delete_from_line(frame->buffer, row, 1);
 }
