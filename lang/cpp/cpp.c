@@ -74,9 +74,11 @@ int kwd_scan(yed_buffer *buff) {
             if (pos < line_len && *scan == '<') { return 1; }
         }
 
-        /************    class\s*\w    ************/
-        scan = strstr(line_data, "class");
-        if (scan != NULL) {
+        /************    ^\s*class\s*\w    ************/
+        pos  = 0;
+        scan = line_data;
+        while (pos < line_len && isspace(*scan)) { scan += 1; pos += 1; }
+        if (strncmp(scan, "class", 5) == 0) {
             scan += strlen("class");
             pos = scan - line_data;
             while (pos < line_len && isspace(*scan)) { scan += 1; pos += 1; }
