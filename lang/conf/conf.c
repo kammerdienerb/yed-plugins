@@ -39,6 +39,7 @@ LOG_EXIT();
 void unload(yed_plugin *self) {}
 
 void maybe_change_ft(yed_buffer *buff) {
+    const char *base;
     const char *ext;
 
     if (buff->ft != FT_UNKNOWN) {
@@ -49,6 +50,13 @@ void maybe_change_ft(yed_buffer *buff) {
     }
     if ((ext = get_path_ext(buff->path)) == NULL) {
         return;
+    }
+
+    if ((base = get_path_basename(buff->path)) != NULL) {
+        if (strcmp(base, "config") == 0) {
+            yed_buffer_set_ft(buff, yed_get_ft("Config"));
+            return;
+        }
     }
 
     if (strcmp(ext, "conf")   == 0
