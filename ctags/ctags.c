@@ -27,7 +27,6 @@ static pthread_mutex_t         gen_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t               parse_pthread;
 static pthread_mutex_t         parse_mtx = PTHREAD_MUTEX_INITIALIZER;
 static int                     using_tmp;
-static int                     used_tmp;
 static char                    tmp_tags_file[4096];
 static array_t                 tmp_tags_buffers;
 static array_t                 hint_stack;
@@ -136,6 +135,7 @@ int yed_plugin_boot(yed_plugin *self) {
     if (!yed_get_var("ctags-tags-file")) {
         yed_set_var("ctags-tags-file", "tags");
     }
+    tags_file_name(); /* Just to create the name in the buffer. */
 
     if (!yed_get_var("ctags-enable-extra-highlighting")) {
         yed_set_var("ctags-enable-extra-highlighting", "yes");
@@ -188,7 +188,7 @@ static const char *tags_file_name(void) {
 
     if (using_tmp) {
         snprintf(tmp_tags_file, sizeof(tmp_tags_file),
-                 ".yed_ctags_%d", getpid());
+                 "/tmp/yed_ctags_%d", getpid());
         tags_file = tmp_tags_file;
     } else {
         tags_file = yed_get_var("ctags-tags-file");
@@ -393,8 +393,6 @@ LOG_EXIT();
     gen_thread_finished = 0;
     gen_thread_started  = 1;
     pthread_create(&gen_pthread, NULL, ctags_gen_thread, strdup(cmd_buff));
-
-    used_tmp = 1;
 }
 
 static void setup_tmp_tags(void) {
@@ -592,7 +590,7 @@ void ctags_parse(void) {
 }
 
 static void delete_tmp_tags_file(void) {
-    if (used_tmp) { unlink(tmp_tags_file); }
+    unlink(tmp_tags_file);
 }
 
 void unload(yed_plugin *self) {
