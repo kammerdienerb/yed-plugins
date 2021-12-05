@@ -1,127 +1,171 @@
 #include <yed/plugin.h>
-#include <yed/highlight.h>
+#include <yed/syntax.h>
 
-#define ARRAY_LOOP(a) for (__typeof((a)[0]) *it = (a); it < (a) + (sizeof(a) / sizeof((a)[0])); ++it)
+static yed_syntax syn;
 
-highlight_info hinfo;
 
-void unload(yed_plugin *self);
-void syntax_python_line_handler(yed_event *event);
-void syntax_python_frame_handler(yed_event *event);
-void syntax_python_buff_mod_pre_handler(yed_event *event);
-void syntax_python_buff_mod_post_handler(yed_event *event);
+#define _CHECK(x, r)                                                      \
+do {                                                                      \
+    if (x) {                                                              \
+        LOG_FN_ENTER();                                                   \
+        yed_log("[!] " __FILE__ ":%d regex error for '%s': %s", __LINE__, \
+                r,                                                        \
+                yed_syntax_get_regex_err(&syn));                          \
+        LOG_EXIT();                                                       \
+    }                                                                     \
+} while (0)
 
+#define SYN()          yed_syntax_start(&syn)
+#define ENDSYN()       yed_syntax_end(&syn)
+#define APUSH(s)       yed_syntax_attr_push(&syn, s)
+#define APOP(s)        yed_syntax_attr_pop(&syn)
+#define RANGE(r)       _CHECK(yed_syntax_range_start(&syn, r), r)
+#define ONELINE()      yed_syntax_range_one_line(&syn)
+#define SKIP(r)        _CHECK(yed_syntax_range_skip(&syn, r), r)
+#define ENDRANGE(r)    _CHECK(yed_syntax_range_end(&syn, r), r)
+#define REGEX(r)       _CHECK(yed_syntax_regex(&syn, r), r)
+#define REGEXSUB(r, g) _CHECK(yed_syntax_regex_sub(&syn, r, g), r)
+#define KWD(k)         yed_syntax_kwd(&syn, k)
+
+#ifdef __APPLE__
+#define WB "[[:>:]]"
+#else
+#define WB "\\b"
+#endif
+
+void estyle(yed_event *event)   { yed_syntax_style_event(&syn, event);         }
+void ebuffdel(yed_event *event) { yed_syntax_buffer_delete_event(&syn, event); }
+void ebuffmod(yed_event *event) { yed_syntax_buffer_mod_event(&syn, event);    }
+void eline(yed_event *event)  {
+    yed_frame *frame;
+
+    frame = event->frame;
+
+    if (!frame
+    ||  !frame->buffer
+    ||  frame->buffer->kind != BUFF_KIND_FILE
+    ||  frame->buffer->ft != yed_get_ft("Python")) {
+        return;
+    }
+
+    yed_syntax_line_event(&syn, event);
+}
+
+
+void unload(yed_plugin *self) {
+    yed_syntax_free(&syn);
+    ys->redraw = 1;
+}
 
 int yed_plugin_boot(yed_plugin *self) {
-    yed_event_handler frame, line, buff_mod_pre, buff_mod_post;
-    char              *kwds[] = {
-        "as",       "in",       "is",     "or",
-        "and",      "def",      "del",    "not",
-        "from",
-        "async",    "await",    "class",
-        "assert",   "global", "import", "lambda",
-        "nonlocal",
-    };
-    char              *control_flow[] = {
-        "if", "for", "try", "elif", "else", "pass", "with", "break", "raise", "while",
-        "yield", "except", "return", "finally", "continue",
-    };
-    char              *constants[] = {
-        "None", "True",
-        "False",
-    };
+    yed_event_handler style;
+    yed_event_handler buffdel;
+    yed_event_handler buffmod;
+    yed_event_handler line;
+
 
     YED_PLUG_VERSION_CHECK();
 
     yed_plugin_set_unload_fn(self, unload);
 
+    style.kind = EVENT_STYLE_CHANGE;
+    style.fn   = estyle;
+    yed_plugin_add_event_handler(self, style);
 
-    frame.kind          = EVENT_FRAME_PRE_BUFF_DRAW;
-    frame.fn            = syntax_python_frame_handler;
-    line.kind           = EVENT_LINE_PRE_DRAW;
-    line.fn             = syntax_python_line_handler;
-    buff_mod_pre.kind   = EVENT_BUFFER_PRE_MOD;
-    buff_mod_pre.fn     = syntax_python_buff_mod_pre_handler;
-    buff_mod_post.kind  = EVENT_BUFFER_POST_MOD;
-    buff_mod_post.fn    = syntax_python_buff_mod_post_handler;
+    buffdel.kind = EVENT_BUFFER_PRE_DELETE;
+    buffdel.fn   = ebuffdel;
+    yed_plugin_add_event_handler(self, buffdel);
 
-    yed_plugin_add_event_handler(self, frame);
+    buffmod.kind = EVENT_BUFFER_POST_MOD;
+    buffmod.fn   = ebuffmod;
+    yed_plugin_add_event_handler(self, buffmod);
+
+    line.kind = EVENT_LINE_PRE_DRAW;
+    line.fn   = eline;
     yed_plugin_add_event_handler(self, line);
-    yed_plugin_add_event_handler(self, buff_mod_pre);
-    yed_plugin_add_event_handler(self, buff_mod_post);
 
 
-    highlight_info_make(&hinfo);
+    SYN();
+        APUSH("&code-comment");
+            RANGE("#"); ONELINE();
+            ENDRANGE("$");
+        APOP();
 
-    ARRAY_LOOP(kwds)
-        highlight_add_kwd(&hinfo, *it, HL_KEY);
-    ARRAY_LOOP(control_flow)
-        highlight_add_kwd(&hinfo, *it, HL_CF);
-    ARRAY_LOOP(constants)
-        highlight_add_kwd(&hinfo, *it, HL_CON);
-    highlight_suffixed_words(&hinfo, '(', HL_CALL);
-    highlight_numbers(&hinfo);
-    highlight_within_multiline(&hinfo, "\"\"\"", "\"\"\"", 0, HL_STR);
-    highlight_within(&hinfo, "\"", "\"", '\\', -1, HL_STR);
-    highlight_within(&hinfo, "'", "'", '\\', -1, HL_STR);
-    highlight_to_eol_from(&hinfo, "#", HL_COMMENT);
+        APUSH("&code-string");
+            RANGE("\"\"\"");
+            ENDRANGE("\"\"\"");
+            RANGE("\""); ONELINE(); SKIP("\\\\\"");
+                APUSH("&code-escape");
+                    REGEX("\\\\.");
+                APOP();
+            ENDRANGE("\"");
+            RANGE("'"); ONELINE(); SKIP("\\\\'");
+                APUSH("&code-escape");
+                    REGEX("\\\\.");
+                APOP();
+            ENDRANGE("'");
+        APOP();
+
+        APUSH("&code-fn-call");
+            REGEXSUB("([[:alpha:]_][[:alnum:]_]*)[[:space:]]*\\(", 1);
+        APOP();
+
+        APUSH("&code-number");
+            REGEXSUB("(^|[^[:alnum:]_])(-?([[:digit:]]+\\.[[:digit:]]*)|(([[:digit:]]*\\.[[:digit:]]+)))"WB, 2);
+            REGEXSUB("(^|[^[:alnum:]_])(-?[[:digit:]]+)"WB, 2);
+            REGEXSUB("(^|[^[:alnum:]_])(0[xX][0-9a-fA-F]+)"WB, 2);
+        APOP();
+
+        APUSH("&code-keyword");
+            KWD("as");
+            KWD("in");
+            KWD("is");
+            KWD("or");
+            KWD("and");
+            KWD("def");
+            KWD("del");
+            KWD("not");
+            KWD("from");
+            KWD("async");
+            KWD("await");
+            KWD("class");
+            KWD("assert");
+            KWD("global");
+            KWD("import");
+            KWD("lambda");
+            KWD("nonlocal");
+        APOP();
+
+        APUSH("&code-control-flow");
+            KWD("if");
+            KWD("for");
+            KWD("try");
+            KWD("elif");
+            KWD("else");
+            KWD("pass");
+            KWD("with");
+            KWD("break");
+            KWD("raise");
+            KWD("while");
+            KWD("yield");
+            KWD("except");
+            KWD("return");
+            KWD("finally");
+            KWD("continue");
+        APOP();
+
+        APUSH("&code-constant");
+            KWD("None");
+            KWD("True");
+            KWD("False");
+        APOP();
+
+        APUSH("&code-field");
+            REGEXSUB("\\.[[:space:]]*([[:alpha:]_][[:alnum:]_]*)", 1);
+        APOP();
+    ENDSYN();
 
     ys->redraw = 1;
 
     return 0;
-}
-
-void unload(yed_plugin *self) {
-    highlight_info_free(&hinfo);
-    ys->redraw = 1;
-}
-
-void syntax_python_frame_handler(yed_event *event) {
-    yed_frame *frame;
-
-    frame = event->frame;
-
-    if (!frame
-    ||  !frame->buffer
-    ||  frame->buffer->kind != BUFF_KIND_FILE
-    ||  frame->buffer->ft != yed_get_ft("Python")) {
-        return;
-    }
-
-    highlight_frame_pre_draw_update(&hinfo, event);
-}
-
-void syntax_python_line_handler(yed_event *event) {
-    yed_frame *frame;
-
-    frame = event->frame;
-
-    if (!frame
-    ||  !frame->buffer
-    ||  frame->buffer->kind != BUFF_KIND_FILE
-    ||  frame->buffer->ft != yed_get_ft("Python")) {
-        return;
-    }
-
-    highlight_line(&hinfo, event);
-}
-
-void syntax_python_buff_mod_pre_handler(yed_event *event) {
-    if (event->buffer == NULL
-    ||  event->buffer->kind != BUFF_KIND_FILE
-    ||  event->buffer->ft != yed_get_ft("Python")) {
-        return;
-    }
-
-    highlight_buffer_pre_mod_update(&hinfo, event);
-}
-
-void syntax_python_buff_mod_post_handler(yed_event *event) {
-    if (event->buffer == NULL
-    ||  event->buffer->kind != BUFF_KIND_FILE
-    ||  event->buffer->ft != yed_get_ft("Python")) {
-        return;
-    }
-
-    highlight_buffer_post_mod_update(&hinfo, event);
 }
