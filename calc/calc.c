@@ -1,5 +1,5 @@
 #include <yed/plugin.h>
-#include <yed/highlight.h>
+#include <yed/syntax.h>
 #include <math.h>
 
 #define PROMPT     "CALC> "
@@ -1059,17 +1059,35 @@ static void line_pre_draw_handler(yed_event *event) {
         }
     }
 
-    highlight_info hinfo;
-    highlight_info_make(&hinfo);
+#ifdef __APPLE__
+#define WB "[[:>:]]"
+#else
+#define WB "\\b"
+#endif
 
-    highlight_numbers(&hinfo);
-    highlight_suffixed_words(&hinfo, '(', HL_CALL);
-    tree_traverse(vars, it) {
-        highlight_add_kwd(&hinfo, tree_it_key(it), HL_KEY);
-    }
-    highlight_line(&hinfo, event);
+    yed_syntax syn;
 
-    highlight_info_free(&hinfo);
+    yed_syntax_start(&syn);
+        yed_syntax_attr_push(&syn, "&code-number");
+            yed_syntax_regex_sub(&syn, "(^|[^[:alnum:]_])(-?([[:digit:]]+\\.[[:digit:]]*)|(([[:digit:]]*\\.[[:digit:]]+))(e\\+[[:digit:]]+)?)"WB, 2);
+            yed_syntax_regex_sub(&syn, "(^|[^[:alnum:]_])(-?[[:digit:]]+)"WB, 2);
+            yed_syntax_regex_sub(&syn, "(^|[^[:alnum:]_])(0[xX][0-9a-fA-F]+)"WB, 2);
+        yed_syntax_attr_pop(&syn);
+
+        yed_syntax_attr_push(&syn, "&code-fn-call");
+            yed_syntax_regex_sub(&syn, "([[:alpha:]_][[:alnum:]_]*)[[:space:]]*\\(", 1);
+        yed_syntax_attr_pop(&syn);
+
+        yed_syntax_attr_push(&syn, "&code-keyword");
+            tree_traverse(vars, it) {
+                yed_syntax_kwd(&syn, tree_it_key(it));
+            }
+        yed_syntax_attr_pop(&syn);
+    yed_syntax_end(&syn);
+
+    yed_syntax_line_event(&syn, event);
+
+    yed_syntax_free(&syn);
 }
 
 static void free_vars(void) {
