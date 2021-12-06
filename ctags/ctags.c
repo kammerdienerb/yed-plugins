@@ -1,5 +1,5 @@
 #include <yed/plugin.h>
-#include <yed/highlight.h>
+#include <yed/syntax.h>
 
 #include <yed/tree.h>
 typedef char *ctags_str_t;
@@ -33,8 +33,8 @@ static array_t                 hint_stack;
 static int                     hint_row;
 static tree(ctags_str_t, int)  tags;
 static pthread_mutex_t         tags_mtx = PTHREAD_MUTEX_INITIALIZER;
-static highlight_info          hinfo;
-static highlight_info          hinfo_tmp;
+static yed_syntax              syn;
+static yed_syntax              syn_tmp;
 
 yed_buffer *get_or_make_buff(void) {
     yed_buffer *buff;
@@ -88,8 +88,8 @@ int yed_plugin_boot(yed_plugin *self) {
 
     yed_plugin_set_unload_fn(self, unload);
 
-    highlight_info_make(&hinfo);
-    highlight_info_make(&hinfo_tmp);
+    yed_syntax_start(&syn);
+    yed_syntax_start(&syn_tmp);
     tags       = tree_make(ctags_str_t, int);
     hint_stack = array_make(ctags_fn_hint);
 
@@ -501,22 +501,29 @@ void * ctags_parse_thread(void *arg) {
     do_hl = !!arg;
 
     if (do_hl) {
-        highlight_info_free(&hinfo_tmp);
-        highlight_info_make(&hinfo_tmp);
+        yed_syntax_free(&syn_tmp);
+        yed_syntax_start(&syn_tmp);
+
+        k = 0;
+        yed_syntax_attr_push(&syn_tmp, "");
 
         tree_traverse(tags, it) {
-            switch (tree_it_val(it)) {
-                case TAG_KIND_MACRO:
-                    highlight_add_kwd(&hinfo_tmp, tree_it_key(it), HL_PP);
-                    break;
-                case TAG_KIND_TYPE:
-                    highlight_add_kwd(&hinfo_tmp, tree_it_key(it), HL_TYPE);
-                    break;
-                case TAG_KIND_ENUMERATOR:
-                    highlight_add_kwd(&hinfo_tmp, tree_it_key(it), HL_CON);
-                    break;
+            if (tree_it_val(it) != k) {
+                yed_syntax_attr_pop(&syn_tmp);
+                switch (tree_it_val(it)) {
+                    case TAG_KIND_MACRO:      yed_syntax_attr_push(&syn_tmp, "&code-preprocessor"); break;
+                    case TAG_KIND_TYPE:       yed_syntax_attr_push(&syn_tmp, "&code-typename");     break;
+                    case TAG_KIND_ENUMERATOR: yed_syntax_attr_push(&syn_tmp, "&code-constant");     break;
+                    default:                  yed_syntax_attr_push(&syn_tmp, "");                   break;
+                }
+                k = tree_it_val(it);
             }
+            yed_syntax_kwd(&syn_tmp, tree_it_key(it));
         }
+
+        yed_syntax_attr_pop(&syn_tmp);
+
+        yed_syntax_end(&syn_tmp);
     }
 
 out:;
@@ -531,7 +538,7 @@ out:;
 }
 
 void ctags_hl_cleanup(void) {
-    highlight_info_free(&hinfo);
+    yed_syntax_free(&syn);
     ys->redraw = 1;
 }
 
@@ -556,15 +563,15 @@ out:;
 }
 
 void ctags_finish_parse(void) {
-    highlight_info hinfo_swap;
+    yed_syntax syn_swap;
 
 LOG_CMD_ENTER("ctags");
     parse_thread_started = parse_thread_finished = 0;
 
     pthread_mutex_lock(&tags_mtx);
-    memcpy(&hinfo_swap, &hinfo, sizeof(hinfo));
-    memcpy(&hinfo, &hinfo_tmp, sizeof(hinfo_tmp));
-    memcpy(&hinfo_tmp, &hinfo_swap, sizeof(hinfo_swap));
+    memcpy(&syn_swap, &syn, sizeof(syn));
+    memcpy(&syn, &syn_tmp, sizeof(syn_tmp));
+    memcpy(&syn_tmp, &syn_swap, sizeof(syn_swap));
     pthread_mutex_unlock(&tags_mtx);
 
     yed_cprint("tags have been parsed for highlighting/completion");
@@ -849,7 +856,7 @@ void ctags_hl_line_handler(yed_event *event) {
 
     if (!has_parsed) { ctags_parse(); }
 
-    highlight_line(&hinfo, event);
+    yed_syntax_line_event(&syn, event);
 }
 
 void ctags_pump_handler(yed_event *event) {
