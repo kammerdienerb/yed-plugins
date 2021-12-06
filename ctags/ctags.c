@@ -68,7 +68,10 @@ void ctags_buffer_pre_quit_handler(yed_event *event);
 void ctags_buffer_post_insert_handler(yed_event *event);
 void ctags_cursor_post_move_handler(yed_event *event);
 
-void estyle(yed_event *event)   { yed_syntax_style_event(&syn, event); }
+void estyle(yed_event *event) {
+    yed_syntax_style_event(&syn,     event);
+    yed_syntax_style_event(&syn_tmp, event);
+}
 
 static int ctags_compl(char *string, struct yed_completion_results_t *results);
 
