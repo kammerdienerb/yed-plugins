@@ -24,6 +24,20 @@ void man_word(int n_args, char **args);
 void man_line_handler(yed_event *event);
 void unload(yed_plugin *self);
 
+void estyle(yed_event *event) {
+    man_section_t *it;
+
+    array_traverse(sections, it) {
+        if (it->syn != NULL) {
+            yed_syntax_style_event(it->syn, event);
+        }
+    }
+
+    if (fallback_section_highlighter != NULL) {
+        yed_syntax_style_event(fallback_section_highlighter, event);
+    }
+}
+
 yed_buffer *get_or_make_buff(void) {
     yed_buffer *buff;
 
@@ -52,6 +66,10 @@ int yed_plugin_boot(yed_plugin *self) {
 
     h.kind = EVENT_LINE_PRE_DRAW;
     h.fn   = man_line_handler;
+    yed_plugin_add_event_handler(self, h);
+
+    h.kind = EVENT_STYLE_CHANGE;
+    h.fn   = estyle;
     yed_plugin_add_event_handler(self, h);
 
     return 0;
