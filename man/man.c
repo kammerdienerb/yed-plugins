@@ -1,17 +1,23 @@
 #include <yed/plugin.h>
-#include <yed/highlight.h>
+#include <yed/syntax.h>
 
 #define ARRAY_LOOP(a) for (__typeof((a)[0]) *it = (a); it < (a) + (sizeof(a) / sizeof((a)[0])); ++it)
 
+#ifdef __APPLE__
+#define WB "[[:>:]]"
+#else
+#define WB "\\b"
+#endif
+
 typedef struct {
-    char           *name;
-    highlight_info *hinfo;
-    u32             start_row;
-    u32             end_row;
+    char       *name;
+    yed_syntax *syn;
+    u32         start_row;
+    u32         end_row;
 } man_section_t;
 
-static array_t         sections;
-static highlight_info *fallback_section_highlighter;
+static array_t     sections;
+static yed_syntax *fallback_section_highlighter;
 
 void man(int n_args, char **args);
 void man_word(int n_args, char **args);
@@ -56,16 +62,16 @@ static void clear_sections(void) {
 
     array_traverse(sections, it) {
         free(it->name);
-        if (it->hinfo != NULL) {
-            highlight_info_free(it->hinfo);
-            free(it->hinfo);
+        if (it->syn != NULL) {
+            yed_syntax_free(it->syn);
+            free(it->syn);
         }
     }
 
     array_clear(sections);
 
     if (fallback_section_highlighter != NULL) {
-        highlight_info_free(fallback_section_highlighter);
+        yed_syntax_free(fallback_section_highlighter);
         free(fallback_section_highlighter);
         fallback_section_highlighter = NULL;
     }
@@ -116,7 +122,7 @@ void man_word(int n_args, char **args) {
     free(word);
 }
 
-static void add_section_highlighter(const char *section_name, highlight_info *hinfo) {
+static void add_section_highlighter(const char *section_name, yed_syntax *syn) {
     man_section_t *it;
     int            found;
 
@@ -130,23 +136,23 @@ static void add_section_highlighter(const char *section_name, highlight_info *hi
     }
 
     if (found) {
-        it->hinfo = hinfo;
+        it->syn = syn;
     } else {
-        highlight_info_free(hinfo);
-        free(hinfo);
+        yed_syntax_free(syn);
+        free(syn);
     }
 }
 
-static void set_fallback_section_highlighter(highlight_info *hinfo) {
+static void set_fallback_section_highlighter(yed_syntax *syn) {
     if (fallback_section_highlighter != NULL) {
-        highlight_info_free(fallback_section_highlighter);
+        yed_syntax_free(fallback_section_highlighter);
         free(fallback_section_highlighter);
     }
-    fallback_section_highlighter = hinfo;
+    fallback_section_highlighter = syn;
 }
 
 static void setup_highlighting(int man_section) {
-    highlight_info    *hinfo;
+    yed_syntax    *syn;
     char              *c_kwds[] = {
         "__asm__",  "asm",
         "const",
@@ -157,15 +163,6 @@ static void setup_highlighting(int man_section) {
         "typedef",
         "union",
         "volatile",
-    };
-    char              *c_pp_kwds[] = {
-        "define",
-        "elif", "else", "endif", "error",
-        "if", "ifdef", "ifndef", "include",
-        "message",
-        "pragma",
-        "undef",
-        "warning",
     };
     char              *c_control_flow[] = {
         "break", "case", "continue", "default", "do", "else", "for",
@@ -182,135 +179,299 @@ static void setup_highlighting(int man_section) {
 
     switch (man_section) {
         case 1:
-            hinfo = malloc(sizeof(*hinfo));
-            highlight_info_make(hinfo);
-                highlight_numbers(hinfo);
-            set_fallback_section_highlighter(hinfo);
+            syn = malloc(sizeof(*syn));
+                yed_syntax_start(syn);
+                    yed_syntax_attr_push(syn, "&code-number");
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(-?([[:digit:]]+\\.[[:digit:]]*)|(([[:digit:]]*\\.[[:digit:]]+))(e\\+[[:digit:]]+)?)"WB, 2);
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(-?[[:digit:]]+)"WB, 2);
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(0[xX][0-9a-fA-F]+)"WB, 2);
+                    yed_syntax_attr_pop(syn);
+                yed_syntax_end(syn);
+            set_fallback_section_highlighter(syn);
 
             break;
 
         case 2:
         case 3:
-            hinfo = malloc(sizeof(*hinfo));
-            highlight_info_make(hinfo);
-                highlight_add_kwd(hinfo, "NULL", HL_CON);
-                highlight_add_kwd(hinfo, "stdin", HL_CON);
-                highlight_add_kwd(hinfo, "stdout", HL_CON);
-                highlight_add_kwd(hinfo, "stderr", HL_CON);
-                highlight_suffixed_words(hinfo, '(', HL_CALL);
-                highlight_numbers(hinfo);
-            set_fallback_section_highlighter(hinfo);
+            syn = malloc(sizeof(*syn));
+                yed_syntax_start(syn);
+                    yed_syntax_attr_push(syn, "&code-number");
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(-?([[:digit:]]+\\.[[:digit:]]*)|(([[:digit:]]*\\.[[:digit:]]+))(e\\+[[:digit:]]+)?[fFlL]?)"WB, 2);
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(-?[[:digit:]]+(([uU]?[lL]{0,2})|([lL]{0,2}[uU]?))?)"WB, 2);
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(0[xX][0-9a-fA-F]+(([uU]?[lL]{0,2})|([lL]{0,2}[uU]?))?)"WB, 2);
+                    yed_syntax_attr_pop(syn);
 
-            hinfo = malloc(sizeof(*hinfo));
-            highlight_info_make(hinfo);
-                ARRAY_LOOP(c_kwds)
-                    highlight_add_kwd(hinfo, *it, HL_KEY);
-                ARRAY_LOOP(c_pp_kwds)
-                    highlight_add_prefixed_kwd(hinfo, '#', *it, HL_PP);
-                ARRAY_LOOP(c_typenames)
-                    highlight_add_kwd(hinfo, *it, HL_TYPE);
-                highlight_add_kwd(hinfo, "__VA_ARGS__", HL_PP);
-                highlight_add_kwd(hinfo, "__FILE__", HL_PP);
-                highlight_add_kwd(hinfo, "__func__", HL_PP);
-                highlight_add_kwd(hinfo, "__FUNCTION__", HL_PP);
-                highlight_add_kwd(hinfo, "__LINE__", HL_PP);
-                highlight_add_kwd(hinfo, "__DATE__", HL_PP);
-                highlight_add_kwd(hinfo, "__TIME__", HL_PP);
-                highlight_add_kwd(hinfo, "__STDC__", HL_PP);
-                highlight_add_kwd(hinfo, "__STDC_VERSION__", HL_PP);
-                highlight_add_kwd(hinfo, "__STDC_HOSTED__", HL_PP);
-                highlight_add_kwd(hinfo, "_plusplus", HL_PP);
-                highlight_add_kwd(hinfo, "__OBJC__", HL_PP);
-                highlight_add_kwd(hinfo, "__ASSEMBLER__", HL_PP);
-                highlight_add_kwd(hinfo, "NULL", HL_CON);
-                highlight_add_kwd(hinfo, "stdin", HL_CON);
-                highlight_add_kwd(hinfo, "stdout", HL_CON);
-                highlight_add_kwd(hinfo, "stderr", HL_CON);
-                highlight_suffixed_words(hinfo, '(', HL_CALL);
-                highlight_numbers(hinfo);
-                highlight_within(hinfo, "\"", "\"", '\\', -1, HL_STR);
-                highlight_within(hinfo, "'", "'", '\\', 1, HL_CHAR);
-                highlight_within(hinfo, "/*", "*/", 0, -1, HL_COMMENT);
-                highlight_to_eol_from(hinfo, "//", HL_COMMENT);
-            add_section_highlighter("SYNOPSIS", hinfo);
+                    yed_syntax_attr_push(syn, "&code-constant");
+                        yed_syntax_kwd(syn, "NULL");
+                        yed_syntax_kwd(syn, "stdin");
+                        yed_syntax_kwd(syn, "stdout");
+                        yed_syntax_kwd(syn, "stderr");
+                    yed_syntax_attr_pop(syn);
 
-            hinfo = malloc(sizeof(*hinfo));
-            highlight_info_make(hinfo);
-                ARRAY_LOOP(c_kwds)
-                    highlight_add_kwd(hinfo, *it, HL_KEY);
-                ARRAY_LOOP(c_pp_kwds)
-                    highlight_add_prefixed_kwd(hinfo, '#', *it, HL_PP);
-                ARRAY_LOOP(c_control_flow)
-                    highlight_add_kwd(hinfo, *it, HL_CF);
-                ARRAY_LOOP(c_typenames)
-                    highlight_add_kwd(hinfo, *it, HL_TYPE);
-                highlight_add_kwd(hinfo, "__VA_ARGS__", HL_PP);
-                highlight_add_kwd(hinfo, "__FILE__", HL_PP);
-                highlight_add_kwd(hinfo, "__func__", HL_PP);
-                highlight_add_kwd(hinfo, "__FUNCTION__", HL_PP);
-                highlight_add_kwd(hinfo, "__LINE__", HL_PP);
-                highlight_add_kwd(hinfo, "__DATE__", HL_PP);
-                highlight_add_kwd(hinfo, "__TIME__", HL_PP);
-                highlight_add_kwd(hinfo, "__STDC__", HL_PP);
-                highlight_add_kwd(hinfo, "__STDC_VERSION__", HL_PP);
-                highlight_add_kwd(hinfo, "__STDC_HOSTED__", HL_PP);
-                highlight_add_kwd(hinfo, "_plusplus", HL_PP);
-                highlight_add_kwd(hinfo, "__OBJC__", HL_PP);
-                highlight_add_kwd(hinfo, "__ASSEMBLER__", HL_PP);
-                highlight_add_kwd(hinfo, "NULL", HL_CON);
-                highlight_add_kwd(hinfo, "stdin", HL_CON);
-                highlight_add_kwd(hinfo, "stdout", HL_CON);
-                highlight_add_kwd(hinfo, "stderr", HL_CON);
-                highlight_suffixed_words(hinfo, '(', HL_CALL);
-                highlight_numbers(hinfo);
-                highlight_within(hinfo, "\"", "\"", '\\', -1, HL_STR);
-                highlight_within(hinfo, "'", "'", '\\', 1, HL_CHAR);
-                highlight_within(hinfo, "/*", "*/", 0, -1, HL_COMMENT);
-                highlight_to_eol_from(hinfo, "//", HL_COMMENT);
-            add_section_highlighter("EXAMPLE", hinfo);
+                    yed_syntax_attr_push(syn, "&code-fn-call");
+                        yed_syntax_regex_sub(syn, "([[:alpha:]_][[:alnum:]_]*)\\(", 1);
+                    yed_syntax_attr_pop(syn);
+                yed_syntax_end(syn);
+            set_fallback_section_highlighter(syn);
 
-            hinfo = malloc(sizeof(*hinfo));
-            highlight_info_make(hinfo);
-                ARRAY_LOOP(c_kwds)
-                    highlight_add_kwd(hinfo, *it, HL_KEY);
-                ARRAY_LOOP(c_pp_kwds)
-                    highlight_add_prefixed_kwd(hinfo, '#', *it, HL_PP);
-                ARRAY_LOOP(c_control_flow)
-                    highlight_add_kwd(hinfo, *it, HL_CF);
-                ARRAY_LOOP(c_typenames)
-                    highlight_add_kwd(hinfo, *it, HL_TYPE);
-                highlight_add_kwd(hinfo, "__VA_ARGS__", HL_PP);
-                highlight_add_kwd(hinfo, "__FILE__", HL_PP);
-                highlight_add_kwd(hinfo, "__func__", HL_PP);
-                highlight_add_kwd(hinfo, "__FUNCTION__", HL_PP);
-                highlight_add_kwd(hinfo, "__LINE__", HL_PP);
-                highlight_add_kwd(hinfo, "__DATE__", HL_PP);
-                highlight_add_kwd(hinfo, "__TIME__", HL_PP);
-                highlight_add_kwd(hinfo, "__STDC__", HL_PP);
-                highlight_add_kwd(hinfo, "__STDC_VERSION__", HL_PP);
-                highlight_add_kwd(hinfo, "__STDC_HOSTED__", HL_PP);
-                highlight_add_kwd(hinfo, "_plusplus", HL_PP);
-                highlight_add_kwd(hinfo, "__OBJC__", HL_PP);
-                highlight_add_kwd(hinfo, "__ASSEMBLER__", HL_PP);
-                highlight_add_kwd(hinfo, "NULL", HL_CON);
-                highlight_add_kwd(hinfo, "stdin", HL_CON);
-                highlight_add_kwd(hinfo, "stdout", HL_CON);
-                highlight_add_kwd(hinfo, "stderr", HL_CON);
-                highlight_suffixed_words(hinfo, '(', HL_CALL);
-                highlight_numbers(hinfo);
-                highlight_within(hinfo, "\"", "\"", '\\', -1, HL_STR);
-                highlight_within(hinfo, "'", "'", '\\', 1, HL_CHAR);
-                highlight_within(hinfo, "/*", "*/", 0, -1, HL_COMMENT);
-                highlight_to_eol_from(hinfo, "//", HL_COMMENT);
-            add_section_highlighter("EXAMPLES", hinfo);
+            syn = malloc(sizeof(*syn));
+                yed_syntax_start(syn);
+                    yed_syntax_attr_push(syn, "&code-comment");
+                        yed_syntax_range_start(syn, "/\\*");
+                            yed_syntax_range_one_line(syn);
+                        yed_syntax_range_end(syn,  "\\*/");
+                        yed_syntax_range_start(syn, "//");
+                            yed_syntax_range_one_line(syn);
+                        yed_syntax_range_end(syn,  "$");
+                        yed_syntax_range_start(syn, "^[[:space:]]*#[[:space:]]*if[[:space:]]+0"WB);
+                            yed_syntax_range_one_line(syn);
+                        yed_syntax_range_end(syn,"^[[:space:]]*#[[:space:]]*(else|endif|elif|elifdef)"WB);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-string");
+                        yed_syntax_regex(syn, "'(\\\\.|[^'\\\\])'");
+
+                        yed_syntax_range_start(syn, "\""); yed_syntax_range_one_line(syn); yed_syntax_range_skip(syn, "\\\\\"");
+                            yed_syntax_attr_push(syn, "&code-escape");
+                                yed_syntax_regex(syn, "\\\\.");
+                            yed_syntax_attr_pop(syn);
+                        yed_syntax_range_end(syn, "\"");
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-number");
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(-?([[:digit:]]+\\.[[:digit:]]*)|(([[:digit:]]*\\.[[:digit:]]+))(e\\+[[:digit:]]+)?[fFlL]?)"WB, 2);
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(-?[[:digit:]]+(([uU]?[lL]{0,2})|([lL]{0,2}[uU]?))?)"WB, 2);
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(0[xX][0-9a-fA-F]+(([uU]?[lL]{0,2})|([lL]{0,2}[uU]?))?)"WB, 2);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-constant");
+                        yed_syntax_kwd(syn, "NULL");
+                        yed_syntax_kwd(syn, "stdin");
+                        yed_syntax_kwd(syn, "stdout");
+                        yed_syntax_kwd(syn, "stderr");
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-keyword");
+                        ARRAY_LOOP(c_kwds)
+                            yed_syntax_kwd(syn, *it);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-control-flow");
+                        ARRAY_LOOP(c_control_flow)
+                            yed_syntax_kwd(syn, *it);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-typename");
+                        ARRAY_LOOP(c_typenames)
+                            yed_syntax_kwd(syn, *it);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-preprocessor");
+                        yed_syntax_kwd(syn, "__VA_ARGS__");
+                        yed_syntax_kwd(syn, "__FILE__");
+                        yed_syntax_kwd(syn, "__func__");
+                        yed_syntax_kwd(syn, "__FUNCTION__");
+                        yed_syntax_kwd(syn, "__LINE__");
+                        yed_syntax_kwd(syn, "__DATE__");
+                        yed_syntax_kwd(syn, "__TIME__");
+                        yed_syntax_kwd(syn, "__STDC__");
+                        yed_syntax_kwd(syn, "__STDC_VERSION__");
+                        yed_syntax_kwd(syn, "__STDC_HOSTED__");
+                        yed_syntax_kwd(syn, "__cplusplus");
+                        yed_syntax_kwd(syn, "__OBJC__");
+                        yed_syntax_kwd(syn, "__ASSEMBLER__");
+
+                        yed_syntax_range_start(syn, "^[[:space:]]*#[[:space:]]*include"); yed_syntax_range_one_line(syn);
+                            yed_syntax_attr_push(syn, "&code-string");
+                                yed_syntax_regex(syn, "[<\"].*");
+                            yed_syntax_attr_pop(syn);
+                        yed_syntax_range_end(syn, "$");
+
+                        yed_syntax_regex(syn, "^[[:space:]]*#[[:space:]]*(syn, define|elif|else|endif|error|if|ifdef|ifndef|line|message|pragma|undef|warning)"WB);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-fn-call");
+                        yed_syntax_regex_sub(syn, "([[:alpha:]_][[:alnum:]_]*)[[:space:]]*\\(", 1);
+                    yed_syntax_attr_pop(syn);
+                yed_syntax_end(syn);
+            add_section_highlighter("SYNOPSIS", syn);
+
+            syn = malloc(sizeof(*syn));
+                yed_syntax_start(syn);
+                    yed_syntax_attr_push(syn, "&code-comment");
+                        yed_syntax_range_start(syn, "/\\*");
+                            yed_syntax_range_one_line(syn);
+                        yed_syntax_range_end(syn,  "\\*/");
+                        yed_syntax_range_start(syn, "//");
+                            yed_syntax_range_one_line(syn);
+                        yed_syntax_range_end(syn,  "$");
+                        yed_syntax_range_start(syn, "^[[:space:]]*#[[:space:]]*if[[:space:]]+0"WB);
+                            yed_syntax_range_one_line(syn);
+                        yed_syntax_range_end(syn,"^[[:space:]]*#[[:space:]]*(else|endif|elif|elifdef)"WB);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-string");
+                        yed_syntax_regex(syn, "'(\\\\.|[^'\\\\])'");
+
+                        yed_syntax_range_start(syn, "\""); yed_syntax_range_one_line(syn); yed_syntax_range_skip(syn, "\\\\\"");
+                            yed_syntax_attr_push(syn, "&code-escape");
+                                yed_syntax_regex(syn, "\\\\.");
+                            yed_syntax_attr_pop(syn);
+                        yed_syntax_range_end(syn, "\"");
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-number");
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(-?([[:digit:]]+\\.[[:digit:]]*)|(([[:digit:]]*\\.[[:digit:]]+))(e\\+[[:digit:]]+)?[fFlL]?)"WB, 2);
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(-?[[:digit:]]+(([uU]?[lL]{0,2})|([lL]{0,2}[uU]?))?)"WB, 2);
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(0[xX][0-9a-fA-F]+(([uU]?[lL]{0,2})|([lL]{0,2}[uU]?))?)"WB, 2);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-constant");
+                        yed_syntax_kwd(syn, "NULL");
+                        yed_syntax_kwd(syn, "stdin");
+                        yed_syntax_kwd(syn, "stdout");
+                        yed_syntax_kwd(syn, "stderr");
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-keyword");
+                        ARRAY_LOOP(c_kwds)
+                            yed_syntax_kwd(syn, *it);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-control-flow");
+                        ARRAY_LOOP(c_control_flow)
+                            yed_syntax_kwd(syn, *it);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-typename");
+                        ARRAY_LOOP(c_typenames)
+                            yed_syntax_kwd(syn, *it);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-preprocessor");
+                        yed_syntax_kwd(syn, "__VA_ARGS__");
+                        yed_syntax_kwd(syn, "__FILE__");
+                        yed_syntax_kwd(syn, "__func__");
+                        yed_syntax_kwd(syn, "__FUNCTION__");
+                        yed_syntax_kwd(syn, "__LINE__");
+                        yed_syntax_kwd(syn, "__DATE__");
+                        yed_syntax_kwd(syn, "__TIME__");
+                        yed_syntax_kwd(syn, "__STDC__");
+                        yed_syntax_kwd(syn, "__STDC_VERSION__");
+                        yed_syntax_kwd(syn, "__STDC_HOSTED__");
+                        yed_syntax_kwd(syn, "__cplusplus");
+                        yed_syntax_kwd(syn, "__OBJC__");
+                        yed_syntax_kwd(syn, "__ASSEMBLER__");
+
+                        yed_syntax_range_start(syn, "^[[:space:]]*#[[:space:]]*include"); yed_syntax_range_one_line(syn);
+                            yed_syntax_attr_push(syn, "&code-string");
+                                yed_syntax_regex(syn, "[<\"].*");
+                            yed_syntax_attr_pop(syn);
+                        yed_syntax_range_end(syn, "$");
+
+                        yed_syntax_regex(syn, "^[[:space:]]*#[[:space:]]*(syn, define|elif|else|endif|error|if|ifdef|ifndef|line|message|pragma|undef|warning)"WB);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-fn-call");
+                        yed_syntax_regex_sub(syn, "([[:alpha:]_][[:alnum:]_]*)[[:space:]]*\\(", 1);
+                    yed_syntax_attr_pop(syn);
+                yed_syntax_end(syn);
+            add_section_highlighter("EXAMPLE", syn);
+
+            syn = malloc(sizeof(*syn));
+                yed_syntax_start(syn);
+                    yed_syntax_attr_push(syn, "&code-comment");
+                        yed_syntax_range_start(syn, "/\\*");
+                            yed_syntax_range_one_line(syn);
+                        yed_syntax_range_end(syn,  "\\*/");
+                        yed_syntax_range_start(syn, "//");
+                            yed_syntax_range_one_line(syn);
+                        yed_syntax_range_end(syn,  "$");
+                        yed_syntax_range_start(syn, "^[[:space:]]*#[[:space:]]*if[[:space:]]+0"WB);
+                            yed_syntax_range_one_line(syn);
+                        yed_syntax_range_end(syn,"^[[:space:]]*#[[:space:]]*(else|endif|elif|elifdef)"WB);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-string");
+                        yed_syntax_regex(syn, "'(\\\\.|[^'\\\\])'");
+
+                        yed_syntax_range_start(syn, "\""); yed_syntax_range_one_line(syn); yed_syntax_range_skip(syn, "\\\\\"");
+                            yed_syntax_attr_push(syn, "&code-escape");
+                                yed_syntax_regex(syn, "\\\\.");
+                            yed_syntax_attr_pop(syn);
+                        yed_syntax_range_end(syn, "\"");
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-number");
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(-?([[:digit:]]+\\.[[:digit:]]*)|(([[:digit:]]*\\.[[:digit:]]+))(e\\+[[:digit:]]+)?[fFlL]?)"WB, 2);
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(-?[[:digit:]]+(([uU]?[lL]{0,2})|([lL]{0,2}[uU]?))?)"WB, 2);
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(0[xX][0-9a-fA-F]+(([uU]?[lL]{0,2})|([lL]{0,2}[uU]?))?)"WB, 2);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-constant");
+                        yed_syntax_kwd(syn, "NULL");
+                        yed_syntax_kwd(syn, "stdin");
+                        yed_syntax_kwd(syn, "stdout");
+                        yed_syntax_kwd(syn, "stderr");
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-keyword");
+                        ARRAY_LOOP(c_kwds)
+                            yed_syntax_kwd(syn, *it);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-control-flow");
+                        ARRAY_LOOP(c_control_flow)
+                            yed_syntax_kwd(syn, *it);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-typename");
+                        ARRAY_LOOP(c_typenames)
+                            yed_syntax_kwd(syn, *it);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-preprocessor");
+                        yed_syntax_kwd(syn, "__VA_ARGS__");
+                        yed_syntax_kwd(syn, "__FILE__");
+                        yed_syntax_kwd(syn, "__func__");
+                        yed_syntax_kwd(syn, "__FUNCTION__");
+                        yed_syntax_kwd(syn, "__LINE__");
+                        yed_syntax_kwd(syn, "__DATE__");
+                        yed_syntax_kwd(syn, "__TIME__");
+                        yed_syntax_kwd(syn, "__STDC__");
+                        yed_syntax_kwd(syn, "__STDC_VERSION__");
+                        yed_syntax_kwd(syn, "__STDC_HOSTED__");
+                        yed_syntax_kwd(syn, "__cplusplus");
+                        yed_syntax_kwd(syn, "__OBJC__");
+                        yed_syntax_kwd(syn, "__ASSEMBLER__");
+
+                        yed_syntax_range_start(syn, "^[[:space:]]*#[[:space:]]*include"); yed_syntax_range_one_line(syn);
+                            yed_syntax_attr_push(syn, "&code-string");
+                                yed_syntax_regex(syn, "[<\"].*");
+                            yed_syntax_attr_pop(syn);
+                        yed_syntax_range_end(syn, "$");
+
+                        yed_syntax_regex(syn, "^[[:space:]]*#[[:space:]]*(syn, define|elif|else|endif|error|if|ifdef|ifndef|line|message|pragma|undef|warning)"WB);
+                    yed_syntax_attr_pop(syn);
+
+                    yed_syntax_attr_push(syn, "&code-fn-call");
+                        yed_syntax_regex_sub(syn, "([[:alpha:]_][[:alnum:]_]*)[[:space:]]*\\(", 1);
+                    yed_syntax_attr_pop(syn);
+                yed_syntax_end(syn);
+            add_section_highlighter("EXAMPLES", syn);
 
             break;
 
         default:
-            hinfo = malloc(sizeof(*hinfo));
-            highlight_info_make(hinfo);
-                highlight_numbers(hinfo);
-            set_fallback_section_highlighter(hinfo);
+            syn = malloc(sizeof(*syn));
+                yed_syntax_start(syn);
+                    yed_syntax_attr_push(syn, "&code-number");
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(-?([[:digit:]]+\\.[[:digit:]]*)|(([[:digit:]]*\\.[[:digit:]]+))(e\\+[[:digit:]]+)?)"WB, 2);
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(-?[[:digit:]]+)"WB, 2);
+                        yed_syntax_regex_sub(syn, "(^|[^[:alnum:]_])(0[xX][0-9a-fA-F]+)"WB, 2);
+                    yed_syntax_attr_pop(syn);
+                yed_syntax_end(syn);
+            set_fallback_section_highlighter(syn);
 
             break;
     }
@@ -425,13 +586,13 @@ again:;
     setup_highlighting(man_section);
 }
 
-static highlight_info *get_section_highlighter(int row) {
+static yed_syntax *get_section_highlighter(int row) {
     man_section_t *it;
 
     array_traverse(sections, it) {
         if (row > it->start_row && row < it->end_row) {
-            if (it->hinfo != NULL) {
-                return it->hinfo;
+            if (it->syn != NULL) {
+                return it->syn;
             }
         }
     }
@@ -462,7 +623,7 @@ void man_line_handler(yed_event *event) {
     yed_attrs       attn;
     int             i;
     yed_attrs      *attrs;
-    highlight_info *hinfo;
+    yed_syntax *syn;
 
     frame = event->frame;
 
@@ -492,7 +653,7 @@ void man_line_handler(yed_event *event) {
         }
     }
 
-    if ((hinfo = get_section_highlighter(event->row))) {
-        highlight_line(hinfo, event);
+    if ((syn = get_section_highlighter(event->row))) {
+        yed_syntax_line_event(syn, event);
     }
 }
