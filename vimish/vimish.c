@@ -14,7 +14,7 @@ void vimish_write_quit(int n_args, char **args);
 #define MODE_INSERT  (0x1)
 #define MODE_DELETE  (0x2)
 #define MODE_YANK    (0x3)
-#define N_MODES      (0x5)
+#define N_MODES      (4)
 
 static int restore_cursor_line;
 
@@ -108,9 +108,21 @@ int yed_plugin_boot(yed_plugin *self) {
 
     bind_keys();
 
+    if (yed_get_var("vimish-normal-attrs") == NULL) {
+        yed_set_var("vimish-normal-attrs", "bg !4");
+    }
+    if (yed_get_var("vimish-insert-attrs") == NULL) {
+        yed_set_var("vimish-insert-attrs", "bg !2");
+    }
+    if (yed_get_var("vimish-delete-attrs") == NULL) {
+        yed_set_var("vimish-delete-attrs", "bg !1");
+    }
+    if (yed_get_var("vimish-yank-attrs") == NULL) {
+        yed_set_var("vimish-yank-attrs", "bg !5");
+    }
+
     vimish_change_mode(MODE_NORMAL, 0, 0);
     yed_set_var("vimish-mode", mode_strs[mode]);
-    YEXE("set", "status-line-var", "vimish-mode");
 
     return 0;
 }
@@ -221,6 +233,15 @@ void vimish_change_mode(int new_mode, int by_line, int cancel) {
     }
 
     yed_set_var("vimish-mode", mode_strs[new_mode]);
+
+    yed_set_var("vimish-mode-attrs", yed_get_var("vimish-insert-attrs"));
+
+    switch (new_mode) {
+        case MODE_NORMAL: yed_set_var("vimish-mode-attrs", yed_get_var("vimish-normal-attrs")); break;
+        case MODE_INSERT: yed_set_var("vimish-mode-attrs", yed_get_var("vimish-insert-attrs")); break;
+        case MODE_DELETE: yed_set_var("vimish-mode-attrs", yed_get_var("vimish-delete-attrs")); break;
+        case MODE_YANK:   yed_set_var("vimish-mode-attrs", yed_get_var("vimish-yank-attrs"));   break;
+    }
 }
 
 static void _vimish_take_key(int key, char *maybe_key_str) {
