@@ -1,56 +1,42 @@
 #include <yed/plugin.h>
-#include <yed/highlight.h>
+#include <yed/syntax.h>
 
-highlight_info hinfo1;
-highlight_info hinfo2;
-
-void unload(yed_plugin *self);
-void syntax_latex_line_handler(yed_event *event);
-void syntax_latex_highlight_comments(yed_event *event);
-
-int yed_plugin_boot(yed_plugin *self) {
-    yed_event_handler  line;
-
-    YED_PLUG_VERSION_CHECK();
-
-    line.kind = EVENT_LINE_PRE_DRAW;
-    line.fn   = syntax_latex_line_handler;
-
-    yed_plugin_set_unload_fn(self, unload);
-    yed_plugin_add_event_handler(self, line);
-
-    highlight_info_make(&hinfo1);
-    highlight_info_make(&hinfo2);
-
-    highlight_within(&hinfo1, "$", "$", '\\', -1, HL_STR);
-    highlight_within(&hinfo1, "``", "''", 0, -1, HL_CON);
-    highlight_within(&hinfo1, "`", "'", 0, -1, HL_CON);
-
-    /*
-    ** This can't properly handle escaped % characters..
-    ** See syntax_latex_highlight_comments()
-    */
-/*     highlight_to_eol_from(&hinfo1, "%", HL_COMMENT); */
+static yed_syntax syn;
 
 
-    /*
-    ** Use a separate highlighter so that these get highlighted within
-    ** equations and such.
-    **/
-    highlight_prefixed_words_inclusive(&hinfo2, '\\', HL_CALL);
+#define _CHECK(x, r)                                                      \
+do {                                                                      \
+    if (x) {                                                              \
+        LOG_FN_ENTER();                                                   \
+        yed_log("[!] " __FILE__ ":%d regex error for '%s': %s", __LINE__, \
+                r,                                                        \
+                yed_syntax_get_regex_err(&syn));                          \
+        LOG_EXIT();                                                       \
+    }                                                                     \
+} while (0)
 
-    ys->redraw = 1;
+#define SYN()          yed_syntax_start(&syn)
+#define ENDSYN()       yed_syntax_end(&syn)
+#define APUSH(s)       yed_syntax_attr_push(&syn, s)
+#define APOP(s)        yed_syntax_attr_pop(&syn)
+#define RANGE(r)       _CHECK(yed_syntax_range_start(&syn, r), r)
+#define ONELINE()      yed_syntax_range_one_line(&syn)
+#define SKIP(r)        _CHECK(yed_syntax_range_skip(&syn, r), r)
+#define ENDRANGE(r)    _CHECK(yed_syntax_range_end(&syn, r), r)
+#define REGEX(r)       _CHECK(yed_syntax_regex(&syn, r), r)
+#define REGEXSUB(r, g) _CHECK(yed_syntax_regex_sub(&syn, r, g), r)
+#define KWD(k)         yed_syntax_kwd(&syn, k)
 
-    return 0;
-}
+#ifdef __APPLE__
+#define WB "[[:>:]]"
+#else
+#define WB "\\b"
+#endif
 
-void unload(yed_plugin *self) {
-    highlight_info_free(&hinfo2);
-    highlight_info_free(&hinfo1);
-    ys->redraw = 1;
-}
-
-void syntax_latex_line_handler(yed_event *event) {
+void estyle(yed_event *event)   { yed_syntax_style_event(&syn, event);         }
+void ebuffdel(yed_event *event) { yed_syntax_buffer_delete_event(&syn, event); }
+void ebuffmod(yed_event *event) { yed_syntax_buffer_mod_event(&syn, event);    }
+void eline(yed_event *event)  {
     yed_frame *frame;
 
     frame = event->frame;
@@ -62,35 +48,71 @@ void syntax_latex_line_handler(yed_event *event) {
         return;
     }
 
-    highlight_line(&hinfo1, event);
-    highlight_line(&hinfo2, event);
-    syntax_latex_highlight_comments(event);
+    yed_syntax_line_event(&syn, event);
 }
 
-void syntax_latex_highlight_comments(yed_event *event) {
-    yed_attrs  comment_attrs;
-    yed_line  *line;
-    yed_glyph *g;
-    yed_glyph *prev;
-    int        idx;
-    int        col;
-    yed_attrs *attr;
 
-    comment_attrs = yed_get_active_style_scomp(STYLE_code_comment);
-    line          = yed_buff_get_line(event->frame->buffer, event->row);
+void unload(yed_plugin *self) {
+    yed_syntax_free(&syn);
+    ys->redraw = 1;
+}
 
-    prev = NULL;
-    yed_line_glyph_traverse(*line, g) {
-        if (g->c == '%') {
-            if (prev == NULL || prev->c != '\\') {
-                idx = ((void*)g) - ((void*)array_data(line->chars));
-                col = yed_line_idx_to_col(line, idx);
-                array_traverse_from(event->line_attrs, attr, col - 1) {
-                    yed_combine_attrs(attr, &comment_attrs);
-                }
-                break;
-            }
-        }
-        prev = g;
-    }
+int yed_plugin_boot(yed_plugin *self) {
+    yed_event_handler style;
+    yed_event_handler buffdel;
+    yed_event_handler buffmod;
+    yed_event_handler line;
+
+
+    YED_PLUG_VERSION_CHECK();
+
+    yed_plugin_set_unload_fn(self, unload);
+
+    style.kind = EVENT_STYLE_CHANGE;
+    style.fn   = estyle;
+    yed_plugin_add_event_handler(self, style);
+
+    buffdel.kind = EVENT_BUFFER_PRE_DELETE;
+    buffdel.fn   = ebuffdel;
+    yed_plugin_add_event_handler(self, buffdel);
+
+    buffmod.kind = EVENT_BUFFER_POST_MOD;
+    buffmod.fn   = ebuffmod;
+    yed_plugin_add_event_handler(self, buffmod);
+
+    line.kind = EVENT_LINE_PRE_DRAW;
+    line.fn   = eline;
+    yed_plugin_add_event_handler(self, line);
+
+
+    SYN();
+        APUSH("&code-comment");
+            REGEXSUB("(^|[^\\\\])(%.*)", 2);
+        APOP();
+
+        APUSH("");
+            RANGE("\\\\\\$"); ENDRANGE(".");
+        APOP();
+        APUSH("&code-string");
+            RANGE("\\$"); SKIP("\\\\\\$");
+
+                APUSH("&code-fn-call");
+                    REGEX("\\\\[a-zA-Z_]+[a-zA-Z0-9_]*");
+                APOP();
+            ENDRANGE("\\$");
+        APOP();
+
+        APUSH("&code-constant");
+            RANGE("``"); ENDRANGE("''");
+            RANGE("`");  ENDRANGE("'");
+        APOP();
+
+        APUSH("&code-fn-call");
+            REGEX("\\\\[a-zA-Z_]+[a-zA-Z0-9_]*");
+        APOP();
+    ENDSYN();
+
+    ys->redraw = 1;
+
+    return 0;
 }

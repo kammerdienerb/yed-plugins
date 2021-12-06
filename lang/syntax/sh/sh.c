@@ -1,10 +1,38 @@
 #include <yed/plugin.h>
-#include <yed/highlight.h>
+#include <yed/syntax.h>
+
+static yed_syntax syn;
 
 #define ARRAY_LOOP(a) for (__typeof((a)[0]) *it = (a); it < (a) + (sizeof(a) / sizeof((a)[0])); ++it)
 
-highlight_info hinfo1;
-highlight_info hinfo2;
+#define _CHECK(x, r)                                                      \
+do {                                                                      \
+    if (x) {                                                              \
+        LOG_FN_ENTER();                                                   \
+        yed_log("[!] " __FILE__ ":%d regex error for '%s': %s", __LINE__, \
+                r,                                                        \
+                yed_syntax_get_regex_err(&syn));                          \
+        LOG_EXIT();                                                       \
+    }                                                                     \
+} while (0)
+
+#define SYN()          yed_syntax_start(&syn)
+#define ENDSYN()       yed_syntax_end(&syn)
+#define APUSH(s)       yed_syntax_attr_push(&syn, s)
+#define APOP(s)        yed_syntax_attr_pop(&syn)
+#define RANGE(r)       _CHECK(yed_syntax_range_start(&syn, r), r)
+#define ONELINE()      yed_syntax_range_one_line(&syn)
+#define SKIP(r)        _CHECK(yed_syntax_range_skip(&syn, r), r)
+#define ENDRANGE(r)    _CHECK(yed_syntax_range_end(&syn, r), r)
+#define REGEX(r)       _CHECK(yed_syntax_regex(&syn, r), r)
+#define REGEXSUB(r, g) _CHECK(yed_syntax_regex_sub(&syn, r, g), r)
+#define KWD(k)         yed_syntax_kwd(&syn, k)
+
+#ifdef __APPLE__
+#define WB "[[:>:]]"
+#else
+#define WB "\\b"
+#endif
 
 typedef struct {
     char       close;
@@ -13,16 +41,44 @@ typedef struct {
     int        paren_balance;
 } sh_hl_cxt;
 
-void unload(yed_plugin *self);
-void syntax_sh_line_handler(yed_event *event);
-void syntax_sh_frame_handler(yed_event *event);
-void syntax_sh_buff_mod_pre_handler(yed_event *event);
-void syntax_sh_buff_mod_post_handler(yed_event *event);
 void syntax_sh_highlight_strings_and_expansions(yed_line *line, array_t line_attrs);
 
+void estyle(yed_event *event)   { yed_syntax_style_event(&syn, event);         }
+void ebuffdel(yed_event *event) { yed_syntax_buffer_delete_event(&syn, event); }
+void ebuffmod(yed_event *event) { yed_syntax_buffer_mod_event(&syn, event);    }
+void eline(yed_event *event)  {
+    yed_frame *frame;
+    yed_line  *line;
+
+    frame = event->frame;
+
+    if (!frame
+    ||  !frame->buffer
+    ||  frame->buffer->kind != BUFF_KIND_FILE
+    ||  frame->buffer->ft != yed_get_ft("Shell")) {
+        return;
+    }
+
+    line = yed_buff_get_line(frame->buffer, event->row);
+    if (line != NULL) {
+        syntax_sh_highlight_strings_and_expansions(line, event->line_attrs);
+    }
+
+    yed_syntax_line_event(&syn, event);
+}
+
+
+void unload(yed_plugin *self) {
+    yed_syntax_free(&syn);
+    ys->redraw = 1;
+}
 
 int yed_plugin_boot(yed_plugin *self) {
-    yed_event_handler frame, line, buff_mod_pre, buff_mod_post;
+    yed_event_handler style;
+    yed_event_handler buffdel;
+    yed_event_handler buffmod;
+    yed_event_handler line;
+
     char              *kwds[] = {
         "time", "shift",
         "source",   "select",   "export",
@@ -48,104 +104,56 @@ int yed_plugin_boot(yed_plugin *self) {
 
     yed_plugin_set_unload_fn(self, unload);
 
+    style.kind = EVENT_STYLE_CHANGE;
+    style.fn   = estyle;
+    yed_plugin_add_event_handler(self, style);
 
-    frame.kind          = EVENT_FRAME_PRE_BUFF_DRAW;
-    frame.fn            = syntax_sh_frame_handler;
-    line.kind           = EVENT_LINE_PRE_DRAW;
-    line.fn             = syntax_sh_line_handler;
-    buff_mod_pre.kind   = EVENT_BUFFER_PRE_MOD;
-    buff_mod_pre.fn     = syntax_sh_buff_mod_pre_handler;
-    buff_mod_post.kind  = EVENT_BUFFER_POST_MOD;
-    buff_mod_post.fn    = syntax_sh_buff_mod_post_handler;
+    buffdel.kind = EVENT_BUFFER_PRE_DELETE;
+    buffdel.fn   = ebuffdel;
+    yed_plugin_add_event_handler(self, buffdel);
 
-    yed_plugin_add_event_handler(self, frame);
+    buffmod.kind = EVENT_BUFFER_POST_MOD;
+    buffmod.fn   = ebuffmod;
+    yed_plugin_add_event_handler(self, buffmod);
+
+    line.kind = EVENT_LINE_PRE_DRAW;
+    line.fn   = eline;
     yed_plugin_add_event_handler(self, line);
-    yed_plugin_add_event_handler(self, buff_mod_pre);
-    yed_plugin_add_event_handler(self, buff_mod_post);
 
 
-    highlight_info_make(&hinfo1);
+    SYN();
+        APUSH("");
+            REGEX("\\${?#");
+            RANGE("\""); SKIP("\\\\\""); ENDRANGE("\"");
+            RANGE("'");  SKIP("\\\\'");  ENDRANGE("'");
+        APOP();
 
-    ARRAY_LOOP(kwds)
-        highlight_add_kwd(&hinfo1, *it, HL_KEY);
-    ARRAY_LOOP(control_flow)
-        highlight_add_kwd(&hinfo1, *it, HL_CF);
-    ARRAY_LOOP(builtins)
-        highlight_add_kwd(&hinfo1, *it, HL_CALL);
-    highlight_numbers(&hinfo1);
+        APUSH("&code-comment");
+            RANGE("#"); ONELINE(); ENDRANGE("$");
+        APOP();
 
-    highlight_info_make(&hinfo2);
 
-    highlight_within_multiline(&hinfo2, "${", "}", 0, HL_IGNORE);
-    highlight_within(&hinfo2, "$", "#", 0, 0, HL_IGNORE);
-    highlight_to_eol_from(&hinfo2, "#", HL_COMMENT);
-    highlight_within_multiline(&hinfo2, "\"", "\"", '\\', HL_IGNORE);
+        APUSH("&code-number");
+            REGEXSUB("(^|[^[:alnum:]_])(-?([[:digit:]]+\\.[[:digit:]]*)|(([[:digit:]]*\\.[[:digit:]]+)))"WB, 2);
+            REGEXSUB("(^|[^[:alnum:]_])(-?[[:digit:]]+)"WB, 2);
+        APOP();
+
+        APUSH("&code-keyword");
+            ARRAY_LOOP(kwds) KWD(*it);
+        APOP();
+
+        APUSH("&code-control-flow");
+            ARRAY_LOOP(control_flow) KWD(*it);
+        APOP();
+
+        APUSH("&code-fn-call");
+            ARRAY_LOOP(builtins) KWD(*it);
+        APOP();
+    ENDSYN();
 
     ys->redraw = 1;
 
     return 0;
-}
-
-void unload(yed_plugin *self) {
-    highlight_info_free(&hinfo2);
-    highlight_info_free(&hinfo1);
-    ys->redraw = 1;
-}
-
-void syntax_sh_frame_handler(yed_event *event) {
-    yed_frame *frame;
-
-    frame = event->frame;
-
-    if (!frame
-    ||  !frame->buffer
-    ||  frame->buffer->kind != BUFF_KIND_FILE
-    ||  frame->buffer->ft != yed_get_ft("Shell")) {
-        return;
-    }
-
-    highlight_frame_pre_draw_update(&hinfo1, event);
-}
-
-void syntax_sh_line_handler(yed_event *event) {
-    yed_frame *frame;
-    yed_line  *line;
-
-    frame = event->frame;
-
-    if (!frame
-    ||  !frame->buffer
-    ||  frame->buffer->kind != BUFF_KIND_FILE
-    ||  frame->buffer->ft != yed_get_ft("Shell")) {
-        return;
-    }
-
-    highlight_line(&hinfo1, event);
-    highlight_line(&hinfo2, event);
-
-    line = yed_buff_get_line(event->frame->buffer, event->row);
-
-    syntax_sh_highlight_strings_and_expansions(line, event->line_attrs);
-}
-
-void syntax_sh_buff_mod_pre_handler(yed_event *event) {
-    if (event->buffer == NULL
-    ||  event->buffer->kind != BUFF_KIND_FILE
-    ||  event->buffer->ft != yed_get_ft("Shell")) {
-        return;
-    }
-
-    highlight_buffer_pre_mod_update(&hinfo1, event);
-}
-
-void syntax_sh_buff_mod_post_handler(yed_event *event) {
-    if (event->buffer == NULL
-    ||  event->buffer->kind != BUFF_KIND_FILE
-    ||  event->buffer->ft != yed_get_ft("Shell")) {
-        return;
-    }
-
-    highlight_buffer_post_mod_update(&hinfo1, event);
 }
 
 void syntax_sh_highlight_strings_and_expansions(yed_line *line, array_t line_attrs) {
@@ -153,6 +161,7 @@ void syntax_sh_highlight_strings_and_expansions(yed_line *line, array_t line_att
     array_t    stack;
     sh_hl_cxt *cxt, new_cxt;
     yed_attrs  str, con, num;
+    yed_glyph  last;
     yed_glyph *g;
 
     if (line->visual_width == 0) {
@@ -164,10 +173,18 @@ void syntax_sh_highlight_strings_and_expansions(yed_line *line, array_t line_att
     con   = yed_active_style_get_code_constant();
     num   = yed_active_style_get_code_number();
     cxt   = NULL;
+    last  = G(0);
     for (col = 1; col <= line->visual_width; col += 1) {
         g = yed_line_col_to_glyph(line, col);
 
         if (!cxt && g->c == '#') { goto cleanup; }
+
+        if (last.c == '\\') {
+            if ((cxt = array_last(stack))) {
+                yed_combine_attrs(array_item(line_attrs, col - 1), cxt->attrs);
+            }
+            goto next;
+        }
 
         if ((cxt = array_last(stack))
         &&  g->c == cxt->close) {
@@ -255,7 +272,9 @@ dont_pop:;
                             &&     g->c != '\''
                             &&     g->c != '"'
                             &&     g->c != '('
-                            &&     g->c != ')') {
+                            &&     g->c != ')'
+                            &&     g->c != '['
+                            &&     g->c != ']') {
                                 yed_combine_attrs(array_item(line_attrs, col), &con);
                                 col += 1;
                             }
@@ -272,6 +291,7 @@ dont_pop:;
             yed_combine_attrs(array_item(line_attrs, col - 1), cxt->attrs);
         }
 next:;
+        last = *g;
     }
 
 cleanup:

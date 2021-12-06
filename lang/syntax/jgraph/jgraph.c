@@ -1,21 +1,71 @@
 #include <yed/plugin.h>
-#include <yed/highlight.h>
+#include <yed/syntax.h>
+
+static yed_syntax syn;
 
 #define ARRAY_LOOP(a) for (__typeof((a)[0]) *it = (a); it < (a) + (sizeof(a) / sizeof((a)[0])); ++it)
 
-highlight_info hinfo1;
-highlight_info hinfo2;
-highlight_info hinfo3;
+#define _CHECK(x, r)                                                      \
+do {                                                                      \
+    if (x) {                                                              \
+        LOG_FN_ENTER();                                                   \
+        yed_log("[!] " __FILE__ ":%d regex error for '%s': %s", __LINE__, \
+                r,                                                        \
+                yed_syntax_get_regex_err(&syn));                          \
+        LOG_EXIT();                                                       \
+    }                                                                     \
+} while (0)
 
-void unload(yed_plugin *self);
-void syntax_jgraph_line_handler(yed_event *event);
-void syntax_jgraph_frame_handler(yed_event *event);
-void syntax_jgraph_buff_mod_pre_handler(yed_event *event);
-void syntax_jgraph_buff_mod_post_handler(yed_event *event);
+#define SYN()          yed_syntax_start(&syn)
+#define ENDSYN()       yed_syntax_end(&syn)
+#define APUSH(s)       yed_syntax_attr_push(&syn, s)
+#define APOP(s)        yed_syntax_attr_pop(&syn)
+#define RANGE(r)       _CHECK(yed_syntax_range_start(&syn, r), r)
+#define ONELINE()      yed_syntax_range_one_line(&syn)
+#define SKIP(r)        _CHECK(yed_syntax_range_skip(&syn, r), r)
+#define ENDRANGE(r)    _CHECK(yed_syntax_range_end(&syn, r), r)
+#define REGEX(r)       _CHECK(yed_syntax_regex(&syn, r), r)
+#define REGEXSUB(r, g) _CHECK(yed_syntax_regex_sub(&syn, r, g), r)
+#define KWD(k)         yed_syntax_kwd(&syn, k)
 
+#ifdef __APPLE__
+#define WBE "[[:<:]]"
+#define WBS "[[:>:]]"
+#else
+#define WBE "\\b"
+#define WBS "\\b"
+#endif
+
+void estyle(yed_event *event)   { yed_syntax_style_event(&syn, event);         }
+void ebuffdel(yed_event *event) { yed_syntax_buffer_delete_event(&syn, event); }
+void ebuffmod(yed_event *event) { yed_syntax_buffer_mod_event(&syn, event);    }
+void eline(yed_event *event)  {
+    yed_frame *frame;
+
+    frame = event->frame;
+
+    if (!frame
+    ||  !frame->buffer
+    ||  frame->buffer->kind != BUFF_KIND_FILE
+    ||  frame->buffer->ft != yed_get_ft("Jgraph")) {
+        return;
+    }
+
+    yed_syntax_line_event(&syn, event);
+}
+
+
+void unload(yed_plugin *self) {
+    yed_syntax_free(&syn);
+    ys->redraw = 1;
+}
 
 int yed_plugin_boot(yed_plugin *self) {
-    yed_event_handler frame, line, buff_mod_pre, buff_mod_post;
+    yed_event_handler style;
+    yed_event_handler buffdel;
+    yed_event_handler buffmod;
+    yed_event_handler line;
+
     char              *edit_kwds[] = {
         "x", "y", "fontsize", "linesep",
         "hjl", "hjc", "hjr", "vjc", "vjt", "vjb",
@@ -41,7 +91,7 @@ int yed_plugin_boot(yed_plugin *self) {
         "y_translate", "string", "newstring", "copystring",
         "copyline", "inherit_axes", "Y", "X", "border", "noborder", "clip",
         "noclip", "graph", "newgraph", "copygraph", "bbox", "preample",
-        "epilogue",
+        "epilogue", "include", "shell",
     };
     char              *value_kwds[] = {
         "none", "solid", "dotted", "dashed", "longdash", "dotdash",
@@ -55,106 +105,55 @@ int yed_plugin_boot(yed_plugin *self) {
         "xbar", "ybar", "text", "stripe", "estripe"
     };
 
+
     YED_PLUG_VERSION_CHECK();
 
     yed_plugin_set_unload_fn(self, unload);
 
+    style.kind = EVENT_STYLE_CHANGE;
+    style.fn   = estyle;
+    yed_plugin_add_event_handler(self, style);
 
-    frame.kind          = EVENT_FRAME_PRE_BUFF_DRAW;
-    frame.fn            = syntax_jgraph_frame_handler;
-    line.kind           = EVENT_LINE_PRE_DRAW;
-    line.fn             = syntax_jgraph_line_handler;
-    buff_mod_pre.kind   = EVENT_BUFFER_PRE_MOD;
-    buff_mod_pre.fn     = syntax_jgraph_buff_mod_pre_handler;
-    buff_mod_post.kind  = EVENT_BUFFER_POST_MOD;
-    buff_mod_post.fn    = syntax_jgraph_buff_mod_post_handler;
+    buffdel.kind = EVENT_BUFFER_PRE_DELETE;
+    buffdel.fn   = ebuffdel;
+    yed_plugin_add_event_handler(self, buffdel);
 
-    yed_plugin_add_event_handler(self, frame);
+    buffmod.kind = EVENT_BUFFER_POST_MOD;
+    buffmod.fn   = ebuffmod;
+    yed_plugin_add_event_handler(self, buffmod);
+
+    line.kind = EVENT_LINE_PRE_DRAW;
+    line.fn   = eline;
     yed_plugin_add_event_handler(self, line);
-    yed_plugin_add_event_handler(self, buff_mod_pre);
-    yed_plugin_add_event_handler(self, buff_mod_post);
-
-    highlight_info_make(&hinfo1);
-
-    highlight_add_kwd(&hinfo1, "shell", HL_KEY);
 
 
-    highlight_info_make(&hinfo2);
+    SYN();
+        APUSH("&code-comment");
+            RANGE("\\(\\*"); ENDRANGE("\\*\\)");
+        APOP();
 
-    ARRAY_LOOP(edit_kwds)
-        highlight_add_kwd(&hinfo2, *it, HL_KEY);
-    ARRAY_LOOP(value_kwds)
-        highlight_add_kwd(&hinfo2, *it, HL_CON);
-    highlight_add_kwd(&hinfo2, "include", HL_PP);
-    highlight_to_eol_from(&hinfo2, ":", HL_CALL);
-    highlight_to_eol_from(&hinfo2, "shell", HL_IGNORE);
-    highlight_numbers(&hinfo2);
+        APUSH("&code-string");
+            RANGE("\""); SKIP("\\\\\"");            ENDRANGE("\"");
+            RANGE("'");  SKIP("\\\\'");             ENDRANGE("'");
+            RANGE(":");  SKIP("\\\\[[:space:]]*$"); ENDRANGE("$");
+        APOP();
 
-    highlight_info_make(&hinfo3);
+        APUSH("&code-number");
+            REGEXSUB("(^|[^[:alnum:]_])(-?([[:digit:]]+\\.[[:digit:]]*)|(([[:digit:]]*\\.[[:digit:]]+)))"WBS, 2);
+            REGEXSUB("(^|[^[:alnum:]_])(-?[[:digit:]]+)"WBS, 2);
+        APOP();
 
-    highlight_within_multiline(&hinfo3, "\"", "\"", '\\', HL_STR);
-    highlight_within_multiline(&hinfo3, "'", "'", '\\', HL_CHAR);
-    highlight_within_multiline(&hinfo3, "(*", "*)", 0, HL_COMMENT);
+        APUSH("&code-keyword");
+            ARRAY_LOOP(edit_kwds) KWD(*it);
+        APOP();
+
+        APUSH("&code-constant");
+            ARRAY_LOOP(value_kwds) KWD(*it);
+        APOP();
+    ENDSYN();
+
 
     ys->redraw = 1;
 
     return 0;
-}
-
-void unload(yed_plugin *self) {
-    highlight_info_free(&hinfo2);
-    highlight_info_free(&hinfo1);
-    ys->redraw = 1;
-}
-
-void syntax_jgraph_frame_handler(yed_event *event) {
-    yed_frame *frame;
-
-    frame = event->frame;
-
-    if (!frame
-    ||  !frame->buffer
-    ||  frame->buffer->kind != BUFF_KIND_FILE
-    ||  frame->buffer->ft != yed_get_ft("Jgraph")) {
-        return;
-    }
-
-    highlight_frame_pre_draw_update(&hinfo2, event);
-}
-
-void syntax_jgraph_line_handler(yed_event *event) {
-    yed_frame *frame;
-
-    frame = event->frame;
-
-    if (!frame
-    ||  !frame->buffer
-    ||  frame->buffer->kind != BUFF_KIND_FILE
-    ||  frame->buffer->ft != yed_get_ft("Jgraph")) {
-        return;
-    }
-
-    highlight_line(&hinfo1, event);
-    highlight_line(&hinfo2, event);
-    highlight_line(&hinfo3, event);
-}
-
-void syntax_jgraph_buff_mod_pre_handler(yed_event *event) {
-    if (event->buffer == NULL
-    ||  event->buffer->kind != BUFF_KIND_FILE
-    ||  event->buffer->ft != yed_get_ft("Jgraph")) {
-        return;
-    }
-
-    highlight_buffer_pre_mod_update(&hinfo3, event);
-}
-
-void syntax_jgraph_buff_mod_post_handler(yed_event *event) {
-    if (event->buffer == NULL
-    ||  event->buffer->kind != BUFF_KIND_FILE
-    ||  event->buffer->ft != yed_get_ft("Jgraph")) {
-        return;
-    }
-
-    highlight_buffer_post_mod_update(&hinfo3, event);
 }

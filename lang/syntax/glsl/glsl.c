@@ -1,146 +1,152 @@
 #include <yed/plugin.h>
-#include <yed/highlight.h>
+#include <yed/syntax.h>
+
+static yed_syntax syn;
 
 #define ARRAY_LOOP(a) for (__typeof((a)[0]) *it = (a); it < (a) + (sizeof(a) / sizeof((a)[0])); ++it)
 
-highlight_info hinfo;
+#define _CHECK(x, r)                                                      \
+do {                                                                      \
+    if (x) {                                                              \
+        LOG_FN_ENTER();                                                   \
+        yed_log("[!] " __FILE__ ":%d regex error for '%s': %s", __LINE__, \
+                r,                                                        \
+                yed_syntax_get_regex_err(&syn));                          \
+        LOG_EXIT();                                                       \
+    }                                                                     \
+} while (0)
 
-void unload(yed_plugin *self);
-void syntax_glsl_line_handler(yed_event *event);
-void syntax_glsl_frame_handler(yed_event *event);
-void syntax_glsl_buff_mod_pre_handler(yed_event *event);
-void syntax_glsl_buff_mod_post_handler(yed_event *event);
+#define SYN()          yed_syntax_start(&syn)
+#define ENDSYN()       yed_syntax_end(&syn)
+#define APUSH(s)       yed_syntax_attr_push(&syn, s)
+#define APOP(s)        yed_syntax_attr_pop(&syn)
+#define RANGE(r)       _CHECK(yed_syntax_range_start(&syn, r), r)
+#define ONELINE()      yed_syntax_range_one_line(&syn)
+#define SKIP(r)        _CHECK(yed_syntax_range_skip(&syn, r), r)
+#define ENDRANGE(r)    _CHECK(yed_syntax_range_end(&syn, r), r)
+#define REGEX(r)       _CHECK(yed_syntax_regex(&syn, r), r)
+#define REGEXSUB(r, g) _CHECK(yed_syntax_regex_sub(&syn, r, g), r)
+#define KWD(k)         yed_syntax_kwd(&syn, k)
 
+#ifdef __APPLE__
+#define WB "[[:>:]]"
+#else
+#define WB "\\b"
+#endif
+
+void estyle(yed_event *event)   { yed_syntax_style_event(&syn, event);         }
+void ebuffdel(yed_event *event) { yed_syntax_buffer_delete_event(&syn, event); }
+void ebuffmod(yed_event *event) { yed_syntax_buffer_mod_event(&syn, event);    }
+void eline(yed_event *event)  {
+    yed_frame *frame;
+
+    frame = event->frame;
+
+    if (!frame
+    ||  !frame->buffer
+    ||  frame->buffer->kind != BUFF_KIND_FILE
+    ||  frame->buffer->ft != yed_get_ft("GLSL")) {
+        return;
+    }
+
+    yed_syntax_line_event(&syn, event);
+}
+
+
+void unload(yed_plugin *self) {
+    yed_syntax_free(&syn);
+    ys->redraw = 1;
+}
 
 int yed_plugin_boot(yed_plugin *self) {
-    yed_event_handler frame, line, buff_mod_pre, buff_mod_post;
+    yed_event_handler style;
+    yed_event_handler buffdel;
+    yed_event_handler buffmod;
+    yed_event_handler line;
+
     char              *kwds[] = {
-        "bool",     "break", "buffer",
-        "case",     "const",   "continue",
-        "default",  "discard", "do",       "double",
-        "else",
-        "float",    "for",
-        "gsampler", "gradvec",
-        "if",       "in", "int",
-        "layout",
+        "buffer", "const", "discard", "in", "layout", "out", "struct",
+    };
+    char              *control_flow[] = {
+        "break", "case", "continue", "default", "do", "else", "for", "if", "return", "switch", "while",
+    };
+    char              *typenames[] = {
+        "bool", "double", "float", "int", "uint", "void",
         "mat2", "mat2x2", "mat2x3", "mat2x4",
         "mat3", "mat3x2", "mat3x3", "mat3x4",
         "mat4", "mat4x2", "mat4x3", "mat4x4",
-        "out",
-        "return",
         "sampler", "sampler2D", "sampler3D",
-        "struct",   "switch",
-        "uint", "uniform",
+        "uniform", "gsampler", "gradvec",
         "vec2",     "vec3",    "vec4",
         "bvec2",     "bvec3",    "bvec4",
         "ivec2",     "ivec3",    "ivec4",
         "uvec2",     "uvec3",    "uvec4",
         "dvec2",     "dvec3",    "dvec4",
-        "void",
-        "while",
     };
-    char              *pp_kwds[] = {
-        "define",
-        "else", "endif", "error", "extension",
-        "if", "ifdef", "ifndef",
-        "line",
-        "undef",
-        "version",
-    };
+
 
     YED_PLUG_VERSION_CHECK();
 
     yed_plugin_set_unload_fn(self, unload);
 
+    style.kind = EVENT_STYLE_CHANGE;
+    style.fn   = estyle;
+    yed_plugin_add_event_handler(self, style);
 
-    frame.kind          = EVENT_FRAME_PRE_BUFF_DRAW;
-    frame.fn            = syntax_glsl_frame_handler;
-    line.kind           = EVENT_LINE_PRE_DRAW;
-    line.fn             = syntax_glsl_line_handler;
-    buff_mod_pre.kind   = EVENT_BUFFER_PRE_MOD;
-    buff_mod_pre.fn     = syntax_glsl_buff_mod_pre_handler;
-    buff_mod_post.kind  = EVENT_BUFFER_POST_MOD;
-    buff_mod_post.fn    = syntax_glsl_buff_mod_post_handler;
+    buffdel.kind = EVENT_BUFFER_PRE_DELETE;
+    buffdel.fn   = ebuffdel;
+    yed_plugin_add_event_handler(self, buffdel);
 
-    yed_plugin_add_event_handler(self, frame);
+    buffmod.kind = EVENT_BUFFER_POST_MOD;
+    buffmod.fn   = ebuffmod;
+    yed_plugin_add_event_handler(self, buffmod);
+
+    line.kind = EVENT_LINE_PRE_DRAW;
+    line.fn   = eline;
     yed_plugin_add_event_handler(self, line);
-    yed_plugin_add_event_handler(self, buff_mod_pre);
-    yed_plugin_add_event_handler(self, buff_mod_post);
 
 
-    highlight_info_make(&hinfo);
+    SYN();
+        APUSH("&code-comment");
+            RANGE("/\\*");
+            ENDRANGE(  "\\*/");
+            RANGE("//");
+            ENDRANGE("$");
+            RANGE("^[[:space:]]*#[[:space:]]*if[[:space:]]+0"WB);
+            ENDRANGE("^[[:space:]]*#[[:space:]]*(else|endif|elif|elifdef)"WB);
+        APOP();
 
-    ARRAY_LOOP(kwds)
-        highlight_add_kwd(&hinfo, *it, HL_KEY);
-    ARRAY_LOOP(pp_kwds)
-        highlight_add_prefixed_kwd(&hinfo, '#', *it, HL_PP);
-    highlight_add_kwd(&hinfo, "__LINE__", HL_PP);
-    highlight_add_kwd(&hinfo, "__VERSION__", HL_PP);
-    highlight_add_kwd(&hinfo, "gl_Position", HL_CON);
-    highlight_suffixed_words(&hinfo, '(', HL_CALL);
-    highlight_numbers(&hinfo);
-    highlight_within(&hinfo, "\"", "\"", '\\', -1, HL_STR);
-    highlight_within(&hinfo, "'", "'", '\\', 1, HL_CHAR);
-    highlight_to_eol_from(&hinfo, "//", HL_COMMENT);
-    highlight_within_multiline(&hinfo, "/*", "*/", 0, HL_COMMENT);
-    highlight_within_multiline(&hinfo, "#if 0", "#endif", 0, HL_COMMENT);
+        APUSH("&code-fn-call");
+            REGEXSUB("([[:alpha:]_][[:alnum:]_]*)[[:space:]]*\\(", 1);
+        APOP();
+
+        APUSH("&code-number");
+            REGEXSUB("(^|[^[:alnum:]_])(-?([[:digit:]]+\\.[[:digit:]]*)|(([[:digit:]]*\\.[[:digit:]]+))(e\\+[[:digit:]]+)?)"WB, 2);
+            REGEXSUB("(^|[^[:alnum:]_])(-?[[:digit:]]+)"WB, 2);
+        APOP();
+
+        APUSH("&code-keyword");
+            ARRAY_LOOP(kwds) KWD(*it);
+        APOP();
+
+        APUSH("&code-control-flow");
+            ARRAY_LOOP(control_flow) KWD(*it);
+        APOP();
+
+        APUSH("&code-typename");
+            ARRAY_LOOP(typenames) KWD(*it);
+        APOP();
+
+        APUSH("&code-preprocessor");
+            REGEX("^[[:space:]]*#[[:space:]]*(define|elif|else|endif|extension|if|ifdef|ifndef|line|undef|version)"WB);
+        APOP();
+
+        APUSH("&code-field");
+            REGEXSUB("(\\.|->)[[:space:]]*([[:alpha:]_][[:alnum:]_]*)", 2);
+        APOP();
+    ENDSYN();
 
     ys->redraw = 1;
 
     return 0;
-}
-
-void unload(yed_plugin *self) {
-    highlight_info_free(&hinfo);
-    ys->redraw = 1;
-}
-
-void syntax_glsl_frame_handler(yed_event *event) {
-    yed_frame *frame;
-
-    frame = event->frame;
-
-    if (!frame
-    ||  !frame->buffer
-    ||  frame->buffer->kind != BUFF_KIND_FILE
-    || (frame->buffer->ft != yed_get_ft("GLSL"))) {
-        return;
-    }
-
-    highlight_frame_pre_draw_update(&hinfo, event);
-}
-
-void syntax_glsl_line_handler(yed_event *event) {
-    yed_frame *frame;
-
-    frame = event->frame;
-
-    if (!frame
-    ||  !frame->buffer
-    ||  frame->buffer->kind != BUFF_KIND_FILE
-    || (frame->buffer->ft != yed_get_ft("GLSL"))) {
-        return;
-    }
-
-    highlight_line(&hinfo, event);
-}
-
-void syntax_glsl_buff_mod_pre_handler(yed_event *event) {
-    if (event->buffer == NULL
-    ||  event->buffer->kind != BUFF_KIND_FILE
-    ||  event->buffer->ft != yed_get_ft("GLSL")) {
-        return;
-    }
-
-    highlight_buffer_pre_mod_update(&hinfo, event);
-}
-
-void syntax_glsl_buff_mod_post_handler(yed_event *event) {
-    if (event->buffer == NULL
-    ||  event->buffer->kind != BUFF_KIND_FILE
-    ||  event->buffer->ft != yed_get_ft("GLSL")) {
-        return;
-    }
-
-    highlight_buffer_post_mod_update(&hinfo, event);
 }
