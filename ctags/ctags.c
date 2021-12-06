@@ -68,6 +68,8 @@ void ctags_buffer_pre_quit_handler(yed_event *event);
 void ctags_buffer_post_insert_handler(yed_event *event);
 void ctags_cursor_post_move_handler(yed_event *event);
 
+void estyle(yed_event *event)   { yed_syntax_style_event(&syn, event); }
+
 static int ctags_compl(char *string, struct yed_completion_results_t *results);
 
 static const char *tags_file_name(void);
@@ -83,6 +85,7 @@ int yed_plugin_boot(yed_plugin *self) {
     yed_event_handler quit;
     yed_event_handler insert;
     yed_event_handler move;
+    yed_event_handler style;
 
     YED_PLUG_VERSION_CHECK();
 
@@ -113,6 +116,8 @@ int yed_plugin_boot(yed_plugin *self) {
     insert.fn          = ctags_buffer_post_insert_handler;
     move.kind          = EVENT_CURSOR_POST_MOVE;
     move.fn            = ctags_cursor_post_move_handler;
+    style.kind         = EVENT_STYLE_CHANGE;
+    style.fn           = estyle;
     yed_plugin_add_event_handler(self, key_pressed);
     yed_plugin_add_event_handler(self, find_line);
     yed_plugin_add_event_handler(self, hl_line);
@@ -122,6 +127,7 @@ int yed_plugin_boot(yed_plugin *self) {
     yed_plugin_add_event_handler(self, quit);
     yed_plugin_add_event_handler(self, insert);
     yed_plugin_add_event_handler(self, move);
+    yed_plugin_add_event_handler(self, style);
 
     yed_plugin_set_command(self, "ctags-gen",                   ctags_gen);
     yed_plugin_set_command(self, "ctags-find",                  ctags_find);
