@@ -123,7 +123,7 @@ int yed_plugin_boot(yed_plugin *self) {
 
     SYN();
         APUSH("");
-            REGEX("\\${?#");
+            REGEX("\\$\\{?#");
             RANGE("\""); SKIP("\\\\\""); ENDRANGE("\"");
             RANGE("'");  SKIP("\\\\'");  ENDRANGE("'");
         APOP();
