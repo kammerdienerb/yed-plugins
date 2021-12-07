@@ -90,7 +90,8 @@ int yed_plugin_boot(yed_plugin *self) {
             RANGE("/\\*");
             ENDRANGE(  "\\*/");
             RANGE("//");
-            ENDRANGE(  "$");
+                ONELINE();
+            ENDRANGE("$");
             RANGE("^[[:space:]]*#[[:space:]]*if[[:space:]]+0"WB);
             ENDRANGE("^[[:space:]]*#[[:space:]]*(else|endif|elif|elifdef)"WB);
         APOP();
